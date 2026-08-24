@@ -127,8 +127,9 @@ VotreDossierPhotos/
 
 ### Étape C — Menu principal
 
-Trois choix : lancer le tri, lancer la censure, ou quitter. Le menu rappelle
-votre avancement et le nombre de photos dans chaque dossier de tri.
+Quatre choix : lancer le tri, lancer la censure, **dupliquer un dossier**, ou
+quitter. Le menu rappelle votre avancement et le nombre de photos dans chaque
+dossier, copies comprises.
 
 ---
 
@@ -163,7 +164,8 @@ traitées plus tard.
 ## 5. Étape 2 — La censure des yeux
 
 Lancée depuis le menu, à tout moment après le tri. Vous choisissez **un seul**
-des quatre dossiers de tri à passer en revue.
+dossier à passer en revue : l'un des quatre dossiers de tri, ou l'une des copies
+faites depuis le menu (section 6).
 
 Pour chaque photo, le logiciel **détecte automatiquement les visages** et la
 position des deux yeux.
@@ -222,7 +224,41 @@ un dossier temporaire. La touche Retour arrière restaure cette copie.
 
 ---
 
-## 6. Reprise de session
+## 6. Dupliquer un dossier
+
+Depuis le menu principal, le bouton **« Dupliquer un dossier »** fait une copie
+complète de l'un de vos dossiers, à côté de l'original.
+
+C'est utile parce que **la censure réécrit les photos sur place** : une fois les
+bandeaux validés, la version sans bandeaux n'existe plus. En dupliquant d'abord,
+vous gardez les deux versions.
+
+Le déroulé :
+
+1. Vous choisissez le dossier à copier (les quatre dossiers de tri, ainsi que
+   les copies déjà faites).
+2. Le logiciel propose un nom, « Nom du dossier - copie », que vous pouvez
+   changer. Un nom déjà pris ou impossible est refusé, et vous êtes invité à en
+   saisir un autre.
+3. La copie s'effectue en affichant son avancement. Sur plusieurs milliers de
+   photos, comptez quelques minutes.
+
+Ce qu'il faut savoir :
+
+- Une copie **n'est pas un cinquième dossier de tri** : le tri en compte
+  toujours quatre, chacun avec sa touche. La copie ne reçoit donc pas de touche.
+- Une copie **peut être censurée** comme n'importe quel dossier : elle apparaît
+  dans la liste proposée à l'étape 2.
+- La copie ne concerne que les fichiers posés directement dans le dossier.
+- Les dossiers `RAW/` et `Videos/` ne sont pas proposés : leur contenu ne doit
+  jamais être modifié, une copie n'aurait donc pas d'objet.
+
+Utilisation typique : dupliquer « À garder » en « À garder - censuré », puis
+censurer la copie. Les originaux restent intacts.
+
+---
+
+## 7. Reprise de session
 
 Vous pouvez fermer le logiciel à n'importe quel moment. Votre avancement est
 enregistré dans `suivi.json`, à l'intérieur du dossier de l'événement, et mis à
@@ -234,7 +270,7 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 
 ---
 
-## 7. Formats de fichiers
+## 8. Formats de fichiers
 
 | Type | Traitement |
 |---|---|
@@ -245,7 +281,7 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 
 ---
 
-## 8. Organisation du code
+## 9. Organisation du code
 
 | Fichier | Responsabilité |
 |---|---|
@@ -258,6 +294,7 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 | `visages.py` | Détection des visages et des yeux |
 | `images.py` | Lecture, orientation, enregistrement, chargement anticipé |
 | `suivi.py` | Fichier de suivi : enregistrement et reprise |
+| `dossiers.py` | Choix d'un dossier, noms valides, duplication |
 | `modeles/` | Modèle de détection livré avec le programme |
 | `verifier_installation.py` | Contrôle que l'installation est fonctionnelle |
 
@@ -265,7 +302,7 @@ Les règles de conception du projet sont consignées dans `CLAUDE.md`.
 
 ---
 
-## 9. Questions courantes
+## 10. Questions courantes
 
 **Le passage d'une photo à l'autre est-il rapide ?**
 Oui. Pendant que vous regardez une photo, les suivantes sont déjà lues en
@@ -279,6 +316,14 @@ pouvez déplacer, redimensionner et incliner.
 **J'ai validé une photo par erreur.**
 Appuyez sur Retour arrière : la photo d'origine est restaurée. Attention, cela
 n'est possible que tant que le logiciel n'a pas été fermé.
+
+**Windows refuse de déplacer mon dossier : « un fichier ou dossier est ouvert ».**
+Cela veut dire que le logiciel tourne encore. Tant qu'il lit des photos en
+arrière-plan, Windows considère le dossier comme ouvert. Fermez le logiciel par
+le bouton **Quitter** du menu (ou par Échap) : le programme relâche alors tous
+les fichiers et se termine pour de bon. Si un message d'erreur inattendu
+apparaît, fermez-le puis quittez normalement — le menu revient toujours à
+l'écran, même après une erreur.
 
 **Puis-je récupérer une photo mise dans « À supprimer » ?**
 Oui : le logiciel ne supprime jamais aucun fichier. Il ne fait que les déplacer.

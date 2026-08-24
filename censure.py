@@ -52,7 +52,7 @@ class FenetreCensure:
     def __init__(self, racine, suivi, nom_dossier):
         self.suivi = suivi
         self.nom_dossier = nom_dossier
-        self.dossier = suivi.chemin_dossier_tri(nom_dossier)
+        self.dossier = suivi.chemin_dossier(nom_dossier)
         self.photos = suivi.censure["photos"]
 
         # Etat de la photo courante (jamais enregistre sur le disque).
@@ -71,9 +71,18 @@ class FenetreCensure:
 
         chemins = [os.path.join(self.dossier, nom) for nom in self.photos]
         self.chargeur = ChargeurAnticipe(chemins)
-        self.detecteur = DetecteurVisages()
-        self.detection = DetectionAnticipee(self.detecteur, self.chargeur,
-                                            len(self.photos))
+        try:
+            self.detecteur = DetecteurVisages()
+            self.detection = DetectionAnticipee(self.detecteur, self.chargeur,
+                                                len(self.photos))
+        except Exception:
+            # Le chargement anticipe est deja lance : si la detection echoue
+            # (modele absent par exemple), il faut l'arreter avant de laisser
+            # remonter l'erreur. Sans cela, un fil continuerait a lire des
+            # photos alors que la fenetre ne s'ouvrira jamais, et le dossier
+            # resterait « ouvert » pour Windows.
+            self.chargeur.arreter()
+            raise
 
         self.fenetre = tk.Toplevel(racine)
         self.fenetre.title("Censure - %s / %s" % (suivi.nom_evenement, nom_dossier))
@@ -430,8 +439,10 @@ class FenetreCensure:
 
     def quitter(self):
         """Enregistre l'avancement, vide le dossier temporaire, ferme la fenetre."""
-        self.chargeur.arreter()
+        # La detection se sert du chargeur : on l'arrete donc en premier, sans
+        # quoi elle pourrait redemander une photo a un chargeur deja arrete.
         self.detection.arreter()
+        self.chargeur.arreter()
 
         # Les copies de sauvegarde ne servent qu'a l'annulation en cours de
         # session (section 9.6) : elles sont effacees a la fermeture, et
@@ -444,7 +455,7 @@ class FenetreCensure:
 
 def lancer_censure(racine, suivi, nom_dossier):
     """Prepare le suivi puis ouvre l'etape de censure sur un dossier de tri."""
-    chemin_dossier = suivi.chemin_dossier_tri(nom_dossier)
+    chemin = suivi.chemin_dossier(nom_dossier)
 
     # On ne recalcule la liste des photos que lorsqu'on change de dossier :
     # reprendre le meme dossier doit retomber exactement sur la meme photo
@@ -452,7 +463,7 @@ def lancer_censure(racine, suivi, nom_dossier):
     if (suivi.censure.get("dossier") != nom_dossier
             or not suivi.censure.get("photos")):
         suivi.censure["dossier"] = nom_dossier
-        suivi.censure["photos"] = photos_du_dossier(chemin_dossier)
+        suivi.censure["photos"] = photos_du_dossier(chemin)
         suivi.censure["position"] = 0
         suivi.censure["historique"] = []
         suivi.enregistrer()
@@ -460,7 +471,7 @@ def lancer_censure(racine, suivi, nom_dossier):
         # Le dossier avait deja ete parcouru en entier : le rouvrir signifie que
         # l'utilisateur veut le reprendre depuis le debut, et non retomber
         # aussitot sur l'ecran de fin.
-        suivi.censure["photos"] = photos_du_dossier(chemin_dossier)
+        suivi.censure["photos"] = photos_du_dossier(chemin)
         suivi.censure["position"] = 0
         suivi.censure["historique"] = []
         suivi.enregistrer()

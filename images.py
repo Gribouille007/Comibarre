@@ -138,9 +138,22 @@ class ChargeurAnticipe:
             self.signal.notify_all()
 
     def arreter(self):
+        """Arrete le fil d'arriere-plan et attend qu'il ait fini de lire.
+
+        L'attente n'est pas un detail : tant que le fil lit un fichier, Windows
+        considere le dossier comme ouvert et refuse de le deplacer, de le
+        renommer ou de le supprimer. En attendant ici, on garantit qu'au retour
+        au menu plus aucun fichier de l'utilisateur n'est ouvert par le
+        programme.
+
+        Le delai d'attente evite de bloquer l'interface pour toujours si la
+        lecture d'un fichier ne se termine pas ; le fil etant demarre en mode
+        « daemon », il ne pourrait de toute facon pas empecher la fermeture.
+        """
         with self.signal:
             self.actif = False
             self.signal.notify_all()
+        self.fil.join(timeout=10)
 
     # -- fonctionnement interne ----------------------------------------------
 
@@ -181,6 +194,8 @@ class ChargeurAnticipe:
             image = self._ouvrir(index)
 
             with self.signal:
+                if not self.actif:
+                    return
                 self.cache[index] = image
                 self._nettoyer_cache()
                 self.signal.notify_all()

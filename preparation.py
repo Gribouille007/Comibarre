@@ -73,7 +73,7 @@ def creer_dossiers(suivi, avec_raw, avec_video):
     """
     os.makedirs(suivi.dossier_evenement, exist_ok=True)
     for nom in suivi.noms_dossiers_tri:
-        os.makedirs(suivi.chemin_dossier_tri(nom), exist_ok=True)
+        os.makedirs(suivi.chemin_dossier(nom), exist_ok=True)
     if avec_raw:
         os.makedirs(os.path.join(suivi.dossier_evenement, NOM_DOSSIER_RAW),
                     exist_ok=True)

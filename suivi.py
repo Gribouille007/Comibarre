@@ -44,6 +44,10 @@ class Suivi:
             "nom_evenement": nom_evenement,
             "dossier_source": dossier_source,
             "dossiers_tri": dossiers_tri,
+            # Copies de dossiers faites depuis le menu principal. Elles ne sont
+            # pas des dossiers de tri (le tri en compte toujours quatre), mais
+            # elles peuvent etre censurees comme les autres.
+            "dossiers_dupliques": [],
             # Passe a True une fois la preparation automatique effectuee ; elle
             # ne doit jamais etre rejouee ensuite (sections 5 et 10).
             "preparation_faite": False,
@@ -115,6 +119,33 @@ class Suivi:
         return [dossier["nom"] for dossier in self.dossiers_tri]
 
     @property
+    def dossiers_dupliques(self):
+        """Noms des copies de dossiers faites depuis le menu principal.
+
+        `setdefault` permet de relire sans erreur un fichier de suivi ecrit par
+        une version precedente du logiciel, qui ne connaissait pas les copies.
+        """
+        return self.donnees.setdefault("dossiers_dupliques", [])
+
+    def ajouter_dossier_duplique(self, nom_dossier):
+        if nom_dossier not in self.dossiers_dupliques:
+            self.dossiers_dupliques.append(nom_dossier)
+
+    @property
+    def noms_dossiers_censurables(self):
+        """Dossiers que l'on peut passer en revue a l'etape de censure.
+
+        Les quatre dossiers de tri, plus les copies qui existent encore sur le
+        disque. Les dossiers RAW et Videos en sont volontairement absents : leur
+        contenu ne doit jamais etre modifie.
+        """
+        noms = list(self.noms_dossiers_tri)
+        for nom in self.dossiers_dupliques:
+            if nom not in noms and os.path.isdir(self.chemin_dossier(nom)):
+                noms.append(nom)
+        return noms
+
+    @property
     def tri(self):
         return self.donnees["tri"]
 
@@ -122,8 +153,12 @@ class Suivi:
     def censure(self):
         return self.donnees["censure"]
 
-    def chemin_dossier_tri(self, nom_dossier):
-        """Chemin complet de l'un des quatre dossiers de tri."""
+    def chemin_dossier(self, nom_dossier):
+        """Chemin complet d'un dossier range dans le dossier de l'evenement.
+
+        Sert aussi bien aux quatre dossiers de tri qu'aux copies faites depuis
+        le menu principal.
+        """
         return os.path.join(self.dossier_evenement, nom_dossier)
 
     def chemin_dossier_temporaire(self):

@@ -237,7 +237,7 @@ class FenetreTri:
             self.afficher_photo_courante()
             return
 
-        destination_dossier = self.suivi.chemin_dossier_tri(nom_dossier)
+        destination_dossier = self.suivi.chemin_dossier(nom_dossier)
         os.makedirs(destination_dossier, exist_ok=True)
         shutil.move(source, os.path.join(destination_dossier, nom_fichier))
 
@@ -265,7 +265,7 @@ class FenetreTri:
             return
 
         derniere = historique.pop()
-        origine = os.path.join(self.suivi.chemin_dossier_tri(derniere["dossier"]),
+        origine = os.path.join(self.suivi.chemin_dossier(derniere["dossier"]),
                                derniere["fichier"])
         destination = os.path.join(self.suivi.dossier_source, derniere["fichier"])
         if os.path.isfile(origine):

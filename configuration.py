@@ -10,10 +10,9 @@ sont remplies ; sinon il explique ce qui manque.
 
 import os
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import ttk
 
-# Caracteres interdits dans un nom de dossier sous Windows.
-CARACTERES_INTERDITS = set('\\/:*?"<>|')
+from dossiers import choisir_dossier, nom_de_dossier_valide
 
 # Valeurs proposees par defaut, que l'utilisateur peut modifier librement.
 DOSSIERS_PAR_DEFAUT = [
@@ -22,16 +21,6 @@ DOSSIERS_PAR_DEFAUT = [
     ("A revoir", "3"),
     ("A supprimer", "4"),
 ]
-
-
-def nom_de_dossier_valide(nom):
-    """Le nom peut-il servir de nom de dossier ?"""
-    if not nom or nom.strip() != nom:
-        return False
-    if any(caractere in CARACTERES_INTERDITS for caractere in nom):
-        return False
-    # Un nom termine par un point ou un espace pose probleme sous Windows.
-    return not nom.endswith(".")
 
 
 class EcranConfiguration:
@@ -124,10 +113,10 @@ class EcranConfiguration:
             variable.set(valeur[-1])
 
     def _choisir_dossier(self):
-        dossier = filedialog.askdirectory(title="Choisir le dossier contenant les photos",
-                                          parent=self.fenetre)
+        dossier = choisir_dossier("Choisir le dossier contenant les photos",
+                                  self.fenetre)
         if dossier:
-            self.variable_dossier.set(os.path.normpath(dossier))
+            self.variable_dossier.set(dossier)
 
     # ------------------------------------------------------------------
     # Validation

@@ -201,9 +201,16 @@ class DetectionAnticipee:
             self.cache.pop(index, None)
 
     def arreter(self):
+        """Arrete le fil de detection et attend qu'il ait termine.
+
+        Comme pour le chargement anticipe, ce fil ouvre des photos : on attend
+        sa fin pour etre sur qu'aucun fichier de l'utilisateur n'est encore
+        ouvert quand on revient au menu (voir `ChargeurAnticipe.arreter`).
+        """
         with self.signal:
             self.actif = False
             self.signal.notify_all()
+        self.fil.join(timeout=10)
 
     def _prochain_a_calculer(self):
         derniere = min(self.position + self.nb_avance, self.nb_photos - 1)
@@ -225,6 +232,8 @@ class DetectionAnticipee:
             resultat = self.detecteur.detecter(image)
 
             with self.signal:
+                if not self.actif:
+                    return
                 self.cache[index] = resultat
                 # On ne garde en memoire que les photos proches de la position.
                 if len(self.cache) > 12:
