@@ -1,0 +1,21 @@
+# Dépendances du logiciel de tri et de censure de photos.
+# Python 3.11 ou supérieur (développé et vérifié sous Python 3.14.6).
+#
+# Installation :
+#   python -m venv venv
+#   venv\Scripts\activate          (Windows)
+#   pip install -r requirements.txt
+#
+# Tkinter n'apparaît pas ici : il est fourni d'origine avec Python.
+
+# Lecture, redimensionnement et enregistrement des images ;
+# dessin des bandeaux noirs (y compris inclinés).
+pillow==12.3.0
+
+# Ajoute à Pillow la lecture et l'enregistrement du format HEIC (photos iPhone).
+pillow-heif==1.5.0
+
+# Détection des visages et des yeux, via le modèle YuNet (cv2.FaceDetectorYN).
+# Remplace mediapipe, dont le détecteur ne voit pas les visages éloignés
+# (mesures comparatives : voir CLAUDE.md, section 2).
+opencv-contrib-python==5.0.0.93

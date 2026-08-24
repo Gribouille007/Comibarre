@@ -1,0 +1,47 @@
+# --- Environnement virtuel ---
+venv/
+.venv/
+env/
+
+# --- Fichiers compilés Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# --- Caches d'outils ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# --- Empaquetage / distribution ---
+build/
+dist/
+*.egg-info/
+*.egg
+
+# --- Configuration locale (propre à la machine, jamais versionnée) ---
+.env
+.env.*
+*.local.json
+config_local.py
+settings.local.json
+
+# --- Éditeurs et IDE ---
+.vscode/
+.idea/
+*.swp
+*~
+
+# --- Fichiers système ---
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- Données de l'utilisateur : photos et avancement ---
+# Aucune photo ni aucun fichier de suivi d'événement ne doit être versionné.
+photos_test/
+photos/
+*_progression.json
+progression.json
