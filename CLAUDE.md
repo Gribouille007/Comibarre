@@ -21,6 +21,11 @@ Il rend deux services **successifs et bien distincts** [4] :
    par l'utilisateur : un clic pose un bandeau noir sur les yeux d'une personne,
    la validation incruste les bandeaux et réenregistre la photo sur place.
 
+S'y ajoute un **mode revue** (ajouté par décision de l'utilisateur, 13 septembre
+2026) : on repasse les photos de l'un des quatre dossiers de tri, et la touche
+d'un autre dossier y déplace aussitôt une photo mal rangée. Il partage la
+fenêtre du tri (`rangement.py`), seul le dossier d'origine change.
+
 Volume visé : jusqu'à environ **3 000 photos** par session, sans perte de
 fluidité. [1]
 
@@ -145,9 +150,11 @@ implémentés :
 - ❌ **Gestion multi-utilisateur** (comptes, profils, droits, authentification).
 - ❌ **Traitement de plusieurs événements simultanés.**
 - ❌ **Toute retouche d'image** autre que la pose de bandeaux noirs sur les yeux
-  (pas de recadrage, de filtre, de correction de couleur, de compression
+  et le **rognage** (pas de filtre, de correction de couleur, de compression
   volontaire, de flou, de pixellisation, de redimensionnement du fichier
-  enregistré).
+  enregistré). Le rognage, exclu par le cahier des charges, a été **ajouté par
+  décision de l'utilisateur** (13 septembre 2026), à l'étape de tri et en mode
+  revue uniquement.
 - ❌ **Tout traitement des fichiers RAW ou vidéo** autre que leur mise à l'écart
   dans les dossiers `RAW/` et `Videos/`. Une fois déplacés, le logiciel n'y
   touche plus.
@@ -164,10 +171,31 @@ implémentés :
   source. [8.2]
 - **Zoom et rotation à l'étape de tri sont purement visuels** : ils ne modifient
   jamais le fichier, qui est déplacé tel quel. [8.1]
+- **Les flèches gauche et droite ne font que naviguer**, dans toutes les étapes :
+  elles ne déplacent, ne modifient ni n'enregistrent aucune photo (seule la
+  position est notée dans le suivi). Au tri et en revue, une photo déjà rangée
+  est montrée depuis le dossier où elle se trouve ; une touche de tri la déplace
+  de là vers le nouveau dossier.
+- **Rognage** : rien n'est écrit avant la validation (Entrée). Le cadre est
+  tracé sur la photo remise dans le bon sens (EXIF) puis éventuellement pivotée
+  pour l'examen ; la rotation d'examen est annulée avant l'enregistrement, elle
+  reste purement visuelle. Mêmes garanties qu'à la censure : copie de sauvegarde,
+  réenregistrement dans le format d'origine, annulation par Retour arrière.
+- **Mode revue** : ne revoit et ne déplace que vers les quatre dossiers de tri ;
+  la touche du dossier revu laisse la photo en place. **Aucun déplacement
+  n'écrase un fichier** portant déjà le même nom.
+- **Bords du bandeau lissés** (suréchantillonnage ×4 puis réduction) : un bandeau
+  incliné ne doit pas présenter de marches d'escalier. L'intérieur reste
+  entièrement noir, et le rendu à l'écran est identique à celui du fichier.
 - **Renommage** : numérotation continue `1, 2, 3…` **sans zéros devant**,
-  extension d'origine conservée, dans l'ordre de la **date de création** (à
-  défaut, date de modification). Procéder **en deux passes** (noms temporaires
-  puis noms définitifs) pour éviter les collisions. [7.2]
+  extension d'origine conservée, dans l'**ordre chronologique strict** :
+  `1` = la photo la plus ancienne par date et heure, `n` = la plus récente, et
+  aucun autre ordre. La date retenue est celle de **prise de vue (EXIF
+  `DateTimeOriginal`)** ; à défaut seulement, la plus ancienne des dates du
+  fichier (sous Windows, la « date de création » est celle de la copie sur le
+  disque et ne reflète pas la prise de vue). Égalité : nom d'origine. Procéder
+  **en deux passes** (noms temporaires puis noms définitifs) pour éviter les
+  collisions. [7.2]
 - **Dossiers `RAW/` et `Videos/` créés uniquement si de tels fichiers
   existent.** [7.1]
 - **La préparation automatique ne se rejoue jamais** à la reprise d'un événement
@@ -184,9 +212,11 @@ implémentés :
   joignant les deux yeux, il n'est pas systématiquement horizontal. [9.3]
 - **Comportement de bascule** : un second clic sur la même personne retire le
   bandeau. Chaque personne est indépendante des autres. [9.3]
-- **Copie de sauvegarde avant modification** : à la censure, une copie intacte
-  est conservée dans un dossier temporaire avant d'écrire, pour permettre
-  l'annulation ; ce dossier est vidé à la fermeture. **Aucune photo d'origine ne
+- **Copie de sauvegarde avant modification** : à la censure et au rognage, une
+  copie intacte est conservée dans un dossier temporaire avant d'écrire, pour
+  permettre l'annulation ; ce dossier est vidé à la fermeture. Chaque copie
+  porte un numéro unique, pour qu'une photo modifiée deux fois n'écrase jamais
+  sa sauvegarde précédente. **Aucune photo d'origine ne
   doit être perdue en cours de session.** [9.6]
 - **Le fichier de suivi est mis à jour à chaque action** de l'utilisateur
   (rangement, passage, pose de bandeau, annulation). [10]
@@ -203,6 +233,23 @@ appliqué aux résultats de la détection de visages.
 
 L'interface Tkinter ne doit **jamais être bloquée** par une lecture de fichier
 ou une détection de visages.
+
+Mise en œuvre :
+
+- Le chargeur prépare pour chaque photo un **aperçu à la taille de l'écran** ;
+  l'affichage part toujours de la plus petite version assez détaillée (aperçu,
+  puis photo réduite de moitié en moitié quand on zoome), jamais de la photo
+  entière pour une vue d'ensemble.
+- Une photo pas encore chargée n'est **pas lue sur le fil principal** : la
+  fenêtre affiche « Chargement... » et revient voir quelques millisecondes plus
+  tard.
+- Les dessins passent par `after_idle` : plusieurs mouvements de souris
+  rapprochés ne donnent qu'un seul dessin.
+- Les photos modifiées (censure, rognage) sont **enregistrées en arrière-plan**
+  (`ecritures.py`). Règle : avant de déplacer, copier ou restaurer un fichier
+  depuis la fenêtre, attendre son enregistrement en cours
+  (`ecritures.attendre(chemin)`) ; à la fermeture, attendre tous les
+  enregistrements avant de vider le dossier des sauvegardes.
 
 ---
 

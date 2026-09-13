@@ -95,7 +95,7 @@ def main():
     # ------------------------------------------------------------------
     dossier = tempfile.mkdtemp(prefix="verification_photos_")
     try:
-        from PIL import Image, ImageDraw
+        from PIL import Image
         from images import charger_image, enregistrer_au_format_origine, format_origine
         from bandeaux import Bandeau
 
@@ -106,7 +106,7 @@ def main():
             format_lu = format_origine(chemin)
 
             image = charger_image(chemin)
-            Bandeau(100, 70, 90, 30, 20).dessiner(ImageDraw.Draw(image))
+            Bandeau(100, 70, 90, 30, 20).dessiner(image)
             enregistrer_au_format_origine(image, chemin, format_lu)
 
             with Image.open(chemin) as relue:
@@ -138,7 +138,7 @@ def main():
             if orientee.size != (150, 300):
                 raise RuntimeError("la photo n'a pas ete remise dans le bon sens")
 
-            Bandeau(75, 200, 60, 24, 0).dessiner(ImageDraw.Draw(orientee))
+            Bandeau(75, 200, 60, 24, 0).dessiner(orientee)
             enregistrer_au_format_origine(orientee, chemin, "JPEG")
 
             relue = charger_image(chemin)
@@ -149,6 +149,32 @@ def main():
             return "pas de double rotation"
 
         verifier("Orientation EXIF", orientation_exif)
+
+        def rognage_dans_le_sens_affiche():
+            """Un cadre trace sur la photo pivotee doit tomber au bon endroit."""
+            from images import copie_de_sauvegarde
+            from rognage import rogner_fichier
+            chemin = os.path.join(dossier, "rognage.png")
+            image = Image.new("RGB", (300, 200), (255, 255, 255))
+            image.putpixel((10, 20), (255, 0, 0))          # repere rouge
+            image.save(chemin)
+
+            # Affichee pivotee d'un quart de tour, la photo mesure 200 x 300 et
+            # le repere s'y trouve en (179, 10). Le cadre (170, 0, 200, 40) le
+            # contient ; une fois remise dans son sens, la photo rognee doit
+            # mesurer 40 x 30 avec le repere en (10, 20).
+            sauvegarde = copie_de_sauvegarde(chemin, os.path.join(dossier, "sauvegardes"))
+            rogner_fichier(chemin, (170, 0, 200, 40), 90)
+            rognee = charger_image(chemin)
+            if rognee.size != (40, 30):
+                raise RuntimeError("taille %s au lieu de (40, 30)" % (rognee.size,))
+            if rognee.getpixel((10, 20)) != (255, 0, 0):
+                raise RuntimeError("le rognage n'est pas tombe au bon endroit")
+            if charger_image(sauvegarde).size != (300, 200):
+                raise RuntimeError("la copie de sauvegarde n'est pas intacte")
+            return "cadre au bon endroit, sauvegarde intacte"
+
+        verifier("Rognage", rognage_dans_le_sens_affiche)
 
         # --------------------------------------------------------------
         print("\n5. Detection de visages et geometrie des bandeaux")
@@ -175,8 +201,21 @@ def main():
                 raise RuntimeError("le bandeau ne couvre pas les deux yeux")
             return "0 degre a plat, 45 degres tete penchee"
 
+        def bandeau_bords_lisses():
+            """Un bandeau incline ne doit pas avoir de bords en marches d'escalier."""
+            image = Image.new("RGB", (200, 200), (255, 255, 255))
+            Bandeau(100, 100, 120, 40, 30).dessiner(image)
+            histogramme = image.convert("L").histogram()
+            adoucis = sum(histogramme[1:255])       # ni blancs ni noirs
+            if adoucis == 0:
+                raise RuntimeError("aucun pixel de bord adouci")
+            if image.getpixel((100, 100)) != (0, 0, 0):
+                raise RuntimeError("l'interieur du bandeau n'est pas entierement noir")
+            return "%d pixels de bord adoucis, interieur noir" % adoucis
+
         verifier("Detection de visages", detection_fonctionne)
         verifier("Inclinaison du bandeau", bandeau_incline)
+        verifier("Bords lisses du bandeau", bandeau_bords_lisses)
 
     finally:
         shutil.rmtree(dossier, ignore_errors=True)

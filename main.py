@@ -6,8 +6,8 @@ Se lance simplement par :
     python main.py
 
 Le deroule est toujours le meme : on demarre un nouvel evenement ou l'on reprend
-un evenement existant, puis le menu principal propose le tri, la censure, la
-duplication d'un dossier, ou de quitter.
+un evenement existant, puis le menu principal propose le tri, la censure, le
+mode revue, la duplication d'un dossier, ou de quitter.
 """
 
 import os
@@ -18,8 +18,9 @@ from tkinter import messagebox, simpledialog, ttk
 
 import dossiers
 import preparation
-from censure import lancer_censure, photos_du_dossier
+from censure import lancer_censure
 from configuration import demander_configuration
+from revue import lancer_revue
 from suivi import Suivi
 from tri import lancer_tri
 
@@ -156,10 +157,12 @@ class MenuPrincipal:
                    command=self._trier).grid(row=2, column=0, pady=4)
         ttk.Button(cadre, text="Etape 2  -  Censurer les yeux", width=38,
                    command=self._censurer).grid(row=3, column=0, pady=4)
+        ttk.Button(cadre, text="Mode revue  -  Reclasser un dossier trie", width=38,
+                   command=self._revoir).grid(row=4, column=0, pady=4)
         ttk.Button(cadre, text="Dupliquer un dossier", width=38,
-                   command=self._dupliquer).grid(row=4, column=0, pady=(12, 4))
+                   command=self._dupliquer).grid(row=5, column=0, pady=(12, 4))
         ttk.Button(cadre, text="Quitter", width=38,
-                   command=self.quitter).grid(row=5, column=0, pady=(16, 0))
+                   command=self.quitter).grid(row=6, column=0, pady=(16, 0))
 
         self._rafraichir()
 
@@ -191,7 +194,7 @@ class MenuPrincipal:
         self.etiquette_etat.config(text="\n".join(lignes))
 
     def _nombre_de_photos(self, nom_dossier):
-        return len(photos_du_dossier(self.suivi.chemin_dossier(nom_dossier)))
+        return len(dossiers.photos_du_dossier(self.suivi.chemin_dossier(nom_dossier)))
 
     def _trier(self):
         if not self.suivi.tri["photos"]:
@@ -221,6 +224,30 @@ class MenuPrincipal:
         self.fenetre.withdraw()
         try:
             nombre = lancer_censure(self.racine, self.suivi, nom_dossier)
+        finally:
+            self.fenetre.deiconify()
+        if nombre == 0:
+            messagebox.showinfo("Dossier vide",
+                                "Le dossier « %s » ne contient aucune photo." % nom_dossier,
+                                parent=self.fenetre)
+        self._rafraichir()
+
+    def _revoir(self):
+        """Repasse un dossier de tri pour corriger des rangements (section 8 bis).
+
+        Seuls les quatre dossiers de tri sont proposes : ce sont aussi les seules
+        destinations possibles, chacune ayant sa touche. Les copies n'en ont pas.
+        """
+        nom_dossier = self._demander_un_dossier(
+            "Choisir le dossier a revoir",
+            "Quel dossier voulez-vous revoir ?",
+            self.suivi.noms_dossiers_tri)
+        if nom_dossier is None:
+            return
+
+        self.fenetre.withdraw()
+        try:
+            nombre = lancer_revue(self.racine, self.suivi, nom_dossier)
         finally:
             self.fenetre.deiconify()
         if nombre == 0:

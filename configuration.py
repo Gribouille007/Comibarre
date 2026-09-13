@@ -22,6 +22,10 @@ DOSSIERS_PAR_DEFAUT = [
     ("A supprimer", "4"),
 ]
 
+# Touches deja utilisees au tri et en revue (R = pivoter, C = rogner) : elles
+# ne peuvent pas servir a ranger une photo.
+TOUCHES_RESERVEES = {"r", "c"}
+
 
 class EcranConfiguration:
     """Fenetre de saisie de la configuration d'un nouvel evenement."""
@@ -156,6 +160,9 @@ class EcranConfiguration:
             erreurs.append("Les quatre touches doivent etre renseignees.")
         elif len({touche.lower() for touche in touches}) != 4:
             erreurs.append("Une meme touche ne peut pas servir deux fois.")
+        elif any(touche.lower() in TOUCHES_RESERVEES for touche in touches):
+            erreurs.append("Les touches R (pivoter) et C (rogner) sont reservees : "
+                           "choisissez-en d'autres.")
 
         return erreurs
 

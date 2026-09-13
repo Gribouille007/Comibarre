@@ -178,6 +178,11 @@ class DetectionAnticipee:
         self.fil = threading.Thread(target=self._travailler, daemon=True)
         self.fil.start()
 
+    def est_prete(self, index):
+        """Les visages de cette photo sont-ils deja calcules ? (sans rien calculer)"""
+        with self.signal:
+            return index in self.cache
+
     def visages(self, index):
         """Renvoie les visages de la photo demandee, en calculant si besoin."""
         with self.signal:

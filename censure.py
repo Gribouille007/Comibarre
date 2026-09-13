@@ -4,7 +4,8 @@ Etape 2 - La censure des yeux (section 9).
 Les photos d'un seul dossier de tri sont passees en revue. Sur chacune, le
 logiciel detecte les visages et la position des yeux ; l'utilisateur clique sur
 une tete pour poser un bandeau noir, reclique pour le retirer. La touche Entree
-incruste les bandeaux et reenregistre la photo par-dessus l'originale.
+incruste les bandeaux et reenregistre la photo par-dessus l'originale. Les
+fleches gauche et droite circulent d'une photo a l'autre sans rien enregistrer.
 
 Point important : tant que la photo n'est pas validee, rien n'est ecrit sur le
 disque (section 9.3). Les bandeaux ne sont que des dessins provisoires a l'ecran.
@@ -14,16 +15,19 @@ import os
 import shutil
 import tkinter as tk
 
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageTk
 
 import bandeaux as module_bandeaux
-from bandeaux import Bandeau, poignee_sous_la_souris
-from images import (ChargeurAnticipe, charger_image, enregistrer_au_format_origine,
-                    est_une_image, format_origine)
+from bandeaux import Bandeau, poignee_sous_la_souris, remplir_polygone_lisse
+from dossiers import photos_du_dossier
+from ecritures import EcrituresEnArrierePlan, signaler_les_echecs
+from images import (ChargeurAnticipe, charger_image, copie_de_sauvegarde,
+                    enregistrer_au_format_origine, format_origine)
 from visages import DetecteurVisages, DetectionAnticipee, visage_le_plus_proche
 
 COULEUR_FOND = "#1e1e1e"
 COULEUR_TEXTE = "#f0f0f0"
+COULEUR_ERREUR = "#ff8080"
 COULEUR_SELECTION = "#00d0ff"
 
 # Deplacement, en pixels ecran, en dessous duquel on considere que l'utilisateur
@@ -31,19 +35,26 @@ COULEUR_SELECTION = "#00d0ff"
 # « deplacer le bandeau » (section 9.4).
 SEUIL_DE_GLISSEMENT = 4
 
+# Delai, en millisecondes, avant de regarder de nouveau si une photo qui
+# n'etait pas encore prete l'est enfin.
+DELAI_ATTENTE_CHARGEMENT = 15
 
-def photos_du_dossier(chemin_dossier):
-    """Liste les images d'un dossier de tri, ordonnees par leur numero."""
-    if not os.path.isdir(chemin_dossier):
-        return []
-    noms = [nom for nom in os.listdir(chemin_dossier)
-            if os.path.isfile(os.path.join(chemin_dossier, nom)) and est_une_image(nom)]
 
-    def numero(nom):
-        base = os.path.splitext(nom)[0]
-        return (0, int(base)) if base.isdigit() else (1, 0)
+def incruster_bandeaux(chemin, liste_bandeaux):
+    """Incruste les bandeaux dans le fichier et le reenregistre dans son format.
 
-    return sorted(noms, key=lambda nom: (numero(nom), nom))
+    La photo est relue et remise dans le bon sens AVANT l'incrustation,
+    exactement comme elle etait affichee : les bandeaux se retrouvent donc a
+    l'emplacement ou l'utilisateur les a poses (section 9.5).
+
+    Cette fonction est executee en arriere-plan (voir ecritures.py). La copie
+    de sauvegarde a deja ete faite par l'appelant.
+    """
+    format_image = format_origine(chemin)
+    image = charger_image(chemin)
+    for bandeau in liste_bandeaux:
+        bandeau.dessiner(image)
+    enregistrer_au_format_origine(image, chemin, format_image)
 
 
 class FenetreCensure:
@@ -57,6 +68,10 @@ class FenetreCensure:
 
         # Etat de la photo courante (jamais enregistre sur le disque).
         self.image = None
+        self.apercu = None           # photo reduite a la taille de l'affichage
+        self.image_ecran = None      # apercu ajuste a la taille exacte de l'affichage
+        self.message = ""            # texte montre quand il n'y a pas de photo
+        self.couleur_message = COULEUR_TEXTE
         self.visages = []
         self.bandeaux_visages = {}   # index du visage -> Bandeau
         self.bandeaux_manuels = []
@@ -69,8 +84,14 @@ class FenetreCensure:
         self.point_presse = None
         self.a_glisse = False
 
+        # Dessin differe et attente du chargement (voir _demander_dessin et
+        # _montrer_des_que_prete).
+        self.dessin_programme = None
+        self.attente = None
+
         chemins = [os.path.join(self.dossier, nom) for nom in self.photos]
-        self.chargeur = ChargeurAnticipe(chemins)
+        taille_ecran = (racine.winfo_screenwidth(), racine.winfo_screenheight())
+        self.chargeur = ChargeurAnticipe(chemins, taille_ecran)
         try:
             self.detecteur = DetecteurVisages()
             self.detection = DetectionAnticipee(self.detecteur, self.chargeur,
@@ -83,6 +104,7 @@ class FenetreCensure:
             # resterait « ouvert » pour Windows.
             self.chargeur.arreter()
             raise
+        self.ecritures = EcrituresEnArrierePlan()
 
         self.fenetre = tk.Toplevel(racine)
         self.fenetre.title("Censure - %s / %s" % (suivi.nom_evenement, nom_dossier))
@@ -93,6 +115,7 @@ class FenetreCensure:
         self._construire()
         self._brancher_commandes()
         self.fenetre.after(60, self.afficher_photo_courante)
+        self.surveillance = self.fenetre.after(300, self._surveiller_ecritures)
 
     # ------------------------------------------------------------------
     # Interface
@@ -112,7 +135,8 @@ class FenetreCensure:
         self.etiquette_avancement.pack(side="left")
 
         rappel = ("Clic = poser/retirer un bandeau  |  Entree = enregistrer  |  "
-                  "Espace = passer  |  Retour arriere = annuler  |  Echap = quitter")
+                  "Espace ou → = passer  |  ← = precedente  |  "
+                  "Retour arriere = annuler  |  Echap = quitter")
         tk.Label(barre, text=rappel, bg="#2b2b2b", fg="#b8b8b8",
                  font=("Segoe UI", 9), anchor="e", padx=10).pack(side="right")
 
@@ -121,8 +145,15 @@ class FenetreCensure:
         self.canvas.bind("<Button-1>", self._souris_pressee)
         self.canvas.bind("<B1-Motion>", self._souris_glissee)
         self.canvas.bind("<ButtonRelease-1>", self._souris_relachee)
-        self.canvas.bind("<Configure>", lambda evenement: self._rendre())
+        self.canvas.bind("<Configure>", self._zone_d_affichage_changee)
         self.fenetre.focus_force()
+
+    def _zone_d_affichage_changee(self, evenement):
+        """Les apercus sont prepares exactement a la taille de la zone d'affichage :
+        la photo s'y affiche alors sans etre redimensionnee."""
+        if evenement.width >= 10 and evenement.height >= 10:
+            self.chargeur.changer_taille_apercu((evenement.width, evenement.height))
+        self._demander_dessin()
 
     # ------------------------------------------------------------------
     # Correspondance entre coordonnees ecran et coordonnees photo
@@ -167,6 +198,7 @@ class FenetreCensure:
         self.suivi.censure["position"] = valeur
 
     def afficher_photo_courante(self):
+        self._annuler_attente()
         if self.position >= len(self.photos):
             self._afficher_fin()
             return
@@ -177,46 +209,103 @@ class FenetreCensure:
 
         self.chargeur.avancer(self.position)
         self.detection.avancer(self.position)
-        self.image = self.chargeur.image(self.position)
+        self._montrer_des_que_prete()
+
+    def _montrer_des_que_prete(self, deja_en_attente=False):
+        """Montre la photo courante des que sa lecture et sa detection sont faites.
+
+        Les deux se font en arriere-plan (images.py et visages.py). Si
+        l'utilisateur va plus vite qu'elles, on ne les fait pas ici, ce qui
+        figerait la fenetre : on affiche « Chargement... » et on revient voir
+        quelques millisecondes plus tard. La fenetre reste ainsi toujours
+        reactive.
+        """
+        self.attente = None
+        nom_fichier = self.photos[self.position]
+        prete = (self.chargeur.est_prete(self.position)
+                 and self.detection.est_prete(self.position))
+        if not prete:
+            if not deja_en_attente:
+                self.image = None
+                self.message = "Chargement..."
+                self.couleur_message = COULEUR_TEXTE
+                self.etiquette_avancement.config(
+                    text="Photo %d sur %d   -   %s   -   chargement..."
+                         % (self.position + 1, len(self.photos), nom_fichier))
+                self._demander_dessin()
+            self.attente = self.fenetre.after(DELAI_ATTENTE_CHARGEMENT,
+                                              self._montrer_des_que_prete, True)
+            return
+
+        self.image, self.apercu = self.chargeur.photo(self.position)
+        self.image_ecran = None
         self.visages = self.detection.visages(self.position) if self.image else []
+        self.message = "Photo illisible"
+        self.couleur_message = COULEUR_ERREUR
 
         self.etiquette_avancement.config(
             text="Photo %d sur %d   -   %s   -   %d visage(s) detecte(s)"
-                 % (self.position + 1, len(self.photos),
-                    self.photos[self.position], len(self.visages)))
-        self._rendre()
+                 % (self.position + 1, len(self.photos), nom_fichier, len(self.visages)))
+        self._demander_dessin()
+
+    def _annuler_attente(self):
+        if self.attente is not None:
+            self.fenetre.after_cancel(self.attente)
+            self.attente = None
 
     def _bandeaux_actifs(self):
         """Tous les bandeaux poses sur la photo, detectes et manuels confondus."""
         return list(self.bandeaux_visages.values()) + self.bandeaux_manuels
 
-    def _rendre(self):
-        self.canvas.delete("all")
+    def _demander_dessin(self):
+        """Programme un nouveau dessin de la photo et de ses bandeaux.
 
-        if self.image is None:
-            self.canvas.create_text(
-                self.canvas.winfo_width() // 2, self.canvas.winfo_height() // 2,
-                text="Photo illisible", fill="#ff8080", font=("Segoe UI", 14))
-            return
+        Le dessin n'est pas fait tout de suite, mais des que Tkinter a fini de
+        traiter les evenements en attente (after_idle). Quand un bandeau est
+        tire a la souris, plusieurs mouvements rapproches ne donnent donc lieu
+        qu'a un seul dessin, avec la position la plus recente : le bandeau suit
+        la souris sans retard.
+        """
+        if self.dessin_programme is None:
+            self.dessin_programme = self.fenetre.after_idle(self._dessiner)
+
+    def _dessiner(self):
+        self.dessin_programme = None
+        self.canvas.delete("all")
 
         largeur_canvas = self.canvas.winfo_width()
         hauteur_canvas = self.canvas.winfo_height()
         if largeur_canvas < 10 or hauteur_canvas < 10:
             return
 
+        if self.image is None:
+            self.canvas.create_text(largeur_canvas // 2, hauteur_canvas // 2,
+                                    text=self.message, fill=self.couleur_message,
+                                    font=("Segoe UI", 16), justify="center")
+            return
+
         facteur = self._facteur()
         taille = (max(1, round(self.image.width * facteur)),
                   max(1, round(self.image.height * facteur)))
-        self.photo_tk = ImageTk.PhotoImage(self.image.resize(taille, Image.LANCZOS))
+        # La photo a la taille de la fenetre est gardee en memoire : pendant
+        # qu'on manipule un bandeau a la souris, seul le bandeau change. Elle
+        # est obtenue a partir de l'apercu, deja prepare a la taille de
+        # l'affichage : le plus souvent, il n'y a donc rien a redimensionner.
+        if self.image_ecran is None or self.image_ecran.size != taille:
+            self.image_ecran = self.apercu.resize(taille, Image.LANCZOS)
+
+        # Les bandeaux sont peints dans l'image affichee avec la meme geometrie
+        # et le meme lissage des bords que ceux qui serviront a les incruster
+        # dans le fichier : ce que l'utilisateur voit est donc bien ce qui sera
+        # enregistre.
+        affichee = self.image_ecran.copy()
+        for bandeau in self._bandeaux_actifs():
+            remplir_polygone_lisse(affichee, [(x * facteur, y * facteur)
+                                              for x, y in bandeau.coins()])
+
+        self.photo_tk = ImageTk.PhotoImage(affichee)
         decalage_x, decalage_y = self._decalage(facteur)
         self.canvas.create_image(decalage_x, decalage_y, anchor="nw", image=self.photo_tk)
-
-        # Les bandeaux sont dessines a l'ecran avec exactement la meme geometrie
-        # que celle qui servira a les incruster dans le fichier : ce que
-        # l'utilisateur voit est donc bien ce qui sera enregistre.
-        for bandeau in self._bandeaux_actifs():
-            points = [self._vers_ecran(x, y) for x, y in bandeau.coins()]
-            self.canvas.create_polygon(points, fill="black", outline="")
 
         if self.bandeau_selectionne is not None:
             self._dessiner_poignees(self.bandeau_selectionne)
@@ -240,13 +329,12 @@ class FenetreCensure:
                                              fill=COULEUR_SELECTION, outline="")
 
     def _afficher_fin(self):
-        self.canvas.delete("all")
+        self.image = None
+        self.message = ("Toutes les photos du dossier « %s » ont ete parcourues.\n"
+                        "Appuyez sur Echap pour revenir au menu." % self.nom_dossier)
+        self.couleur_message = COULEUR_TEXTE
         self.etiquette_avancement.config(text="Censure terminee")
-        self.canvas.create_text(
-            self.canvas.winfo_width() // 2, self.canvas.winfo_height() // 2,
-            text="Toutes les photos du dossier « %s » ont ete parcourues.\n"
-                 "Appuyez sur Echap pour revenir au menu." % self.nom_dossier,
-            fill=COULEUR_TEXTE, font=("Segoe UI", 16), justify="center")
+        self._demander_dessin()
         self.suivi.enregistrer()
 
     # ------------------------------------------------------------------
@@ -277,7 +365,7 @@ class FenetreCensure:
             if bandeau.contient(x, y):
                 self.bandeau_selectionne = bandeau
                 self.action = "corps"
-                self._rendre()
+                self._demander_dessin()
                 return
 
     def _souris_glissee(self, evenement):
@@ -298,7 +386,7 @@ class FenetreCensure:
             self.bandeau_selectionne.deplacer(x - ancien_x, y - ancien_y)
             self.point_presse = (evenement.x, evenement.y)
 
-        self._rendre()
+        self._demander_dessin()
 
     def _souris_relachee(self, evenement):
         # Un glissement a deja produit son effet : il n'y a rien de plus a faire.
@@ -321,7 +409,7 @@ class FenetreCensure:
                 self.bandeaux_manuels.remove(bandeau)
                 if self.bandeau_selectionne is bandeau:
                     self.bandeau_selectionne = None
-                self._rendre()
+                self._demander_dessin()
                 return
 
         # 2. Sinon, on rattache le clic au visage detecte correspondant.
@@ -334,14 +422,14 @@ class FenetreCensure:
                 self.bandeaux_visages[index_visage] = Bandeau.depuis_yeux(
                     visage.oeil_droit, visage.oeil_gauche)
             self.bandeau_selectionne = None
-            self._rendre()
+            self._demander_dessin()
             return
 
         # 3. Aucun visage a cet endroit : bandeau manuel de taille standard.
         nouveau = Bandeau.manuel_par_defaut(x, y, self.image.width)
         self.bandeaux_manuels.append(nouveau)
         self.bandeau_selectionne = nouveau
-        self._rendre()
+        self._demander_dessin()
 
     # ------------------------------------------------------------------
     # Clavier
@@ -353,8 +441,10 @@ class FenetreCensure:
             self.quitter()
         elif touche in ("Return", "KP_Enter"):
             self.valider()
-        elif touche == "space":
+        elif touche in ("space", "Right"):
             self.passer()
+        elif touche == "Left":
+            self.precedente()
         elif touche == "BackSpace":
             self.annuler()
 
@@ -363,7 +453,11 @@ class FenetreCensure:
     # ------------------------------------------------------------------
 
     def valider(self):
-        """Incruste les bandeaux, enregistre la photo sur place, puis passe a la suivante."""
+        """Incruste les bandeaux, enregistre la photo sur place, puis passe a la suivante.
+
+        L'enregistrement lui-meme se fait en arriere-plan (voir ecritures.py) :
+        la photo suivante apparait sans attendre la fin de l'encodage.
+        """
         if self.position >= len(self.photos):
             return
 
@@ -375,24 +469,18 @@ class FenetreCensure:
         if liste_bandeaux and os.path.isfile(chemin):
             # Copie intacte AVANT toute modification, pour permettre l'annulation
             # (section 9.6). Aucune photo d'origine n'est perdue tant que la
-            # session est en cours.
-            dossier_temporaire = self.suivi.chemin_dossier_temporaire()
-            os.makedirs(dossier_temporaire, exist_ok=True)
-            sauvegarde = os.path.join(dossier_temporaire, nom_fichier)
-            shutil.copy2(chemin, sauvegarde)
+            # session est en cours. Si cette photo est encore en cours
+            # d'enregistrement (validee, puis reprise apres un retour en
+            # arriere), la copie attend la version a jour.
+            self.ecritures.attendre(chemin)
+            sauvegarde = copie_de_sauvegarde(chemin, self.suivi.chemin_dossier_temporaire())
+            self.ecritures.ajouter(chemin, incruster_bandeaux, chemin, liste_bandeaux)
 
-            # La photo est relue et remise dans le bon sens AVANT l'incrustation,
-            # exactement comme elle etait affichee : les bandeaux se retrouvent
-            # donc a l'emplacement ou l'utilisateur les a poses (section 9.5).
-            format_image = format_origine(chemin)
-            image = charger_image(chemin)
-            dessin = ImageDraw.Draw(image)
-            for bandeau in liste_bandeaux:
-                bandeau.dessiner(dessin)
-            enregistrer_au_format_origine(image, chemin, format_image)
-
-            # La photo sur le disque a change : sa detection doit etre refaite si
-            # l'on revient dessus.
+            # Le fichier ne sera a jour que dans un instant : la version
+            # censuree est donc mise en memoire des maintenant, pour qu'un
+            # retour avec la fleche gauche la montre bien avec ses bandeaux.
+            # La detection, elle, devra etre refaite sur cette nouvelle version.
+            self._garder_la_version_censuree(liste_bandeaux)
             self.detection.oublier(self.position)
 
         # Sans aucun bandeau, le fichier n'est pas reecrit : cela eviterait une
@@ -406,10 +494,35 @@ class FenetreCensure:
         self.suivi.enregistrer()
         self.afficher_photo_courante()
 
+    def _garder_la_version_censuree(self, liste_bandeaux):
+        """Place dans le cache la photo et son apercu, bandeaux incrustes."""
+        image = self.image.copy()
+        for bandeau in liste_bandeaux:
+            bandeau.dessiner(image)
+
+        # L'apercu recoit les memes bandeaux, ramenes a son echelle.
+        apercu = self.apercu.copy()
+        echelle = apercu.width / image.width
+        for bandeau in liste_bandeaux:
+            remplir_polygone_lisse(apercu, [(x * echelle, y * echelle)
+                                            for x, y in bandeau.coins()])
+        self.chargeur.remplacer(self.position, image, apercu)
+
     def passer(self):
         """Passe a la photo suivante sans la modifier (section 9.5)."""
         if self.position < len(self.photos):
             self.position += 1
+            self.suivi.enregistrer()
+            self.afficher_photo_courante()
+
+    def precedente(self):
+        """Revient a la photo precedente sans rien enregistrer.
+
+        Comme pour le passage, les bandeaux provisoires de la photo quittee sont
+        abandonnes : seule la validation ecrit sur le disque.
+        """
+        if self.position > 0:
+            self.position -= 1
             self.suivi.enregistrer()
             self.afficher_photo_courante()
 
@@ -418,6 +531,10 @@ class FenetreCensure:
         historique = self.suivi.censure["historique"]
         if not historique:
             return
+
+        # L'enregistrement de la photo peut etre encore en cours : il doit etre
+        # termine avant que l'on remette l'original en place.
+        self.ecritures.attendre()
 
         derniere = historique.pop()
         sauvegarde = derniere.get("sauvegarde")
@@ -434,11 +551,33 @@ class FenetreCensure:
         self.afficher_photo_courante()
 
     # ------------------------------------------------------------------
+    # Enregistrements en arriere-plan
+    # ------------------------------------------------------------------
+
+    def _surveiller_ecritures(self):
+        """Verifie regulierement qu'aucun enregistrement en arriere-plan n'a echoue."""
+        signaler_les_echecs(self.ecritures, self.chargeur, self.fenetre)
+        self.surveillance = self.fenetre.after(300, self._surveiller_ecritures)
+
+    # ------------------------------------------------------------------
     # Fermeture
     # ------------------------------------------------------------------
 
     def quitter(self):
         """Enregistre l'avancement, vide le dossier temporaire, ferme la fenetre."""
+        self._annuler_attente()
+        self.fenetre.after_cancel(self.surveillance)
+        if self.dessin_programme is not None:
+            self.fenetre.after_cancel(self.dessin_programme)
+            self.dessin_programme = None
+
+        # Les dernieres photos validees doivent etre enregistrees avant de
+        # fermer, et avant de vider le dossier des sauvegardes.
+        self.etiquette_avancement.config(text="Enregistrement des dernieres photos...")
+        self.fenetre.update_idletasks()
+        self.ecritures.arreter()
+        signaler_les_echecs(self.ecritures, self.chargeur, self.fenetre)
+
         # La detection se sert du chargeur : on l'arrete donc en premier, sans
         # quoi elle pourrait redemander une photo a un chargeur deja arrete.
         self.detection.arreter()

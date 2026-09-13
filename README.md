@@ -95,7 +95,8 @@ Vous renseignez :
 
 Le bouton « Continuer » ne s'active que si tout est correct : dossier existant et
 non vide, nom utilisable comme nom de dossier, quatre noms et quatre touches
-renseignés, et aucune touche utilisée deux fois.
+renseignés, et aucune touche utilisée deux fois. Les touches **R** et **C** sont
+réservées (pivoter et rogner) et ne peuvent pas servir de touche de tri.
 
 ### Étape B — Préparation automatique
 
@@ -115,7 +116,10 @@ VotreDossierPhotos/
 ```
 
 - Les photos sont **renommées `1`, `2`, `3`…**, sans zéros devant, extension
-  d'origine conservée, dans l'ordre de leur **date de création**.
+  d'origine conservée, dans l'ordre **chronologique de prise de vue** : `1` est
+  la photo la plus ancienne (date et heure), le dernier numéro la plus récente.
+  La date est lue dans la photo elle-même (EXIF) ; à défaut, on prend la plus
+  ancienne des dates du fichier.
 - Les fichiers **RAW** (`.cr2`, `.nef`, `.arw`, `.dng`…) et les **vidéos**
   (`.mp4`, `.mov`, `.avi`, `.mkv`…) sont **mis de côté** et ne sont plus jamais
   touchés ensuite.
@@ -127,8 +131,8 @@ VotreDossierPhotos/
 
 ### Étape C — Menu principal
 
-Quatre choix : lancer le tri, lancer la censure, **dupliquer un dossier**, ou
-quitter. Le menu rappelle votre avancement et le nombre de photos dans chaque
+Cinq choix : lancer le tri, lancer la censure, lancer le **mode revue**,
+**dupliquer un dossier**, ou quitter. Le menu rappelle votre avancement et le nombre de photos dans chaque
 dossier, copies comprises.
 
 ---
@@ -144,9 +148,11 @@ en permanence, sous la forme « Photo 12 sur 340 ».
 | Touche ou action | Effet |
 |---|---|
 | **Vos 4 touches de tri** | Déplacer la photo vers le dossier correspondant, puis afficher la suivante |
-| **Barre d'espace** | Passer à la photo suivante **sans** la ranger (elle reste dans le dossier source) |
-| **Retour arrière** | Annuler le dernier rangement : la photo revient à sa place et se réaffiche. Plusieurs annulations de suite sont possibles |
+| **Barre d'espace** ou **flèche droite** | Passer à la photo suivante **sans** la ranger (elle reste dans le dossier source) |
+| **Flèche gauche** | Revenir à la photo précédente, sans rien déplacer |
+| **Retour arrière** | Annuler la dernière action (rangement ou rognage) : la photo revient à sa place et se réaffiche. Plusieurs annulations de suite sont possibles |
 | **R** | Faire pivoter l'affichage d'un quart de tour |
+| **C** | Rogner la photo (voir ci-dessous) |
 | **Molette de la souris** | Agrandir ou réduire la vue (zoom) |
 | **Cliquer-glisser** | Déplacer la vue lorsque la photo est agrandie |
 | **Échap** | Enregistrer l'avancement et fermer |
@@ -155,17 +161,72 @@ en permanence, sous la forme « Photo 12 sur 340 ».
 > uniquement à mieux examiner la photo avant de la ranger ; elle est déplacée
 > telle quelle.
 
+**Revenir sur une photo déjà rangée.** Les flèches font circuler librement d'une
+photo à l'autre sans rien déplacer. Une photo déjà rangée s'affiche depuis le
+dossier où elle se trouve, indiqué dans la barre du bas ; une touche de tri la
+déplace alors de ce dossier vers le nouveau.
+
+### Rogner une photo
+
+1. Appuyez sur **C** : la photo s'affiche en entier.
+2. **Cliquez-glissez** pour tracer le cadre à garder ; ce qui sera coupé est
+   assombri. Pour corriger, tracez simplement un nouveau cadre.
+3. **Entrée** rogne la photo et l'enregistre à sa place, dans son format
+   d'origine. **Échap** ou **C** abandonne sans rien modifier.
+
+- Si vous avez pivoté l'affichage avec R, tracez le cadre sur la photo telle
+  que vous la voyez : le rognage tombe au bon endroit, et la photo est ensuite
+  enregistrée dans son sens d'origine (la rotation reste purement visuelle).
+- Une copie intacte est gardée avant chaque rognage : **Retour arrière** la
+  remet en place. Ces copies sont effacées à la fermeture de la fenêtre ;
+  l'annulation d'un rognage n'est donc possible que tant qu'elle est ouverte.
+
 L'étape est terminée lorsque toutes les photos ont été soit rangées, soit
 passées. Les photos passées restent dans le dossier source et pourront être
 traitées plus tard.
 
 ---
 
-## 5. Étape 2 — La censure des yeux
+## 5. Mode revue — reclasser un dossier trié
+
+Pour corriger un rangement après coup. Depuis le menu, choisissez **« Mode
+revue »**, puis l'un des quatre dossiers de tri : ses photos défilent une par
+une, comme au tri.
+
+Par exemple, en revoyant « À garder », vous tombez sur une photo ratée : appuyez
+sur la touche de « Ratées », elle y est **déplacée immédiatement** et la photo
+suivante s'affiche.
+
+| Touche ou action | Effet |
+|---|---|
+| **Touche d'un autre dossier** | Déplacer la photo vers ce dossier, puis afficher la suivante |
+| **Touche du dossier revu** | Laisser la photo où elle est et passer à la suivante |
+| **Barre d'espace** ou **flèche droite** | Passer à la photo suivante sans la déplacer |
+| **Flèche gauche** | Revenir à la photo précédente, sans rien déplacer |
+| **Retour arrière** | Annuler le dernier déplacement ou rognage |
+| **R**, **C**, molette, cliquer-glisser | Comme au tri : pivoter, rogner, zoomer, déplacer la vue |
+| **Échap** | Enregistrer l'avancement et fermer |
+
+Ce qu'il faut savoir :
+
+- Seuls les quatre dossiers de tri peuvent être revus, et ce sont les seules
+  destinations possibles. Les copies (section 8) n'ont pas de touche.
+- Si le dossier de destination contient déjà un fichier du même nom, **rien
+  n'est déplacé** et un message vous prévient : aucune photo n'est jamais
+  écrasée.
+- En revenant sur une photo déjà déplacée (flèche gauche), la barre du bas
+  indique le dossier où elle se trouve maintenant.
+- Rouvrir le même dossier reprend à la photo où vous vous étiez arrêté ; les
+  photos rangées entre-temps dans ce dossier sont ajoutées à la fin. Une fois le
+  dossier revu en entier, le rouvrir repart du début.
+
+---
+
+## 6. Étape 2 — La censure des yeux
 
 Lancée depuis le menu, à tout moment après le tri. Vous choisissez **un seul**
 dossier à passer en revue : l'un des quatre dossiers de tri, ou l'une des copies
-faites depuis le menu (section 6).
+faites depuis le menu (section 7).
 
 Pour chaque photo, le logiciel **détecte automatiquement les visages** et la
 position des deux yeux.
@@ -177,7 +238,9 @@ position des deux yeux.
 
 Chaque personne est indépendante : vous pouvez masquer certains visages et en
 laisser d'autres visibles. Le bandeau **épouse l'inclinaison de la tête** : il
-s'aligne sur la ligne qui joint les deux yeux.
+s'aligne sur la ligne qui joint les deux yeux. Ses bords sont lissés : même
+incliné, il ne présente pas de marches d'escalier, à l'écran comme dans le
+fichier enregistré.
 
 ### Quand la détection échoue
 
@@ -199,7 +262,8 @@ apparaît, entouré de poignées bleues.
 |---|---|
 | **Clic gauche** | Poser ou retirer un bandeau |
 | **Entrée** | Incruster les bandeaux, enregistrer la photo sur place, passer à la suivante |
-| **Barre d'espace** | Passer à la photo suivante sans la modifier |
+| **Barre d'espace** ou **flèche droite** | Passer à la photo suivante sans la modifier |
+| **Flèche gauche** | Revenir à la photo précédente sans rien enregistrer (les bandeaux non validés sont abandonnés) |
 | **Retour arrière** | Annuler la dernière validation : la photo d'origine est restaurée et réaffichée |
 | **Échap** | Enregistrer l'avancement, vider le dossier temporaire et fermer |
 
@@ -224,7 +288,7 @@ un dossier temporaire. La touche Retour arrière restaure cette copie.
 
 ---
 
-## 6. Dupliquer un dossier
+## 7. Dupliquer un dossier
 
 Depuis le menu principal, le bouton **« Dupliquer un dossier »** fait une copie
 complète de l'un de vos dossiers, à côté de l'original.
@@ -258,7 +322,7 @@ censurer la copie. Les originaux restent intacts.
 
 ---
 
-## 7. Reprise de session
+## 8. Reprise de session
 
 Vous pouvez fermer le logiciel à n'importe quel moment. Votre avancement est
 enregistré dans `suivi.json`, à l'intérieur du dossier de l'événement, et mis à
@@ -270,7 +334,7 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 
 ---
 
-## 8. Formats de fichiers
+## 9. Formats de fichiers
 
 | Type | Traitement |
 |---|---|
@@ -281,20 +345,24 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 
 ---
 
-## 9. Organisation du code
+## 10. Organisation du code
 
 | Fichier | Responsabilité |
 |---|---|
 | `main.py` | Lancement, gestion des sessions, menu principal |
 | `configuration.py` | Écran de configuration d'un nouvel événement |
 | `preparation.py` | Création des dossiers, renommage, mise à l'écart RAW/vidéo |
-| `tri.py` | Étape 1 : affichage, clavier, zoom, rotation, rangement |
+| `tri.py` | Étape 1 : lance la fenêtre de rangement sur le dossier source |
+| `revue.py` | Mode revue : lance la fenêtre de rangement sur un dossier de tri |
+| `rangement.py` | Fenêtre commune au tri et à la revue : clavier, déplacements, navigation, annulation |
+| `visionneuse.py` | Affichage d'une photo : zoom, vue, rotation, cadre de rognage |
+| `rognage.py` | Écriture d'une photo rognée sur le disque |
 | `censure.py` | Étape 2 : affichage, clics, validation, annulation |
-| `bandeaux.py` | Géométrie du bandeau : inclinaison, poignées, dessin |
+| `bandeaux.py` | Géométrie du bandeau : inclinaison, poignées, dessin aux bords lisses |
 | `visages.py` | Détection des visages et des yeux |
 | `images.py` | Lecture, orientation, enregistrement, chargement anticipé |
 | `suivi.py` | Fichier de suivi : enregistrement et reprise |
-| `dossiers.py` | Choix d'un dossier, noms valides, duplication |
+| `dossiers.py` | Choix d'un dossier, noms valides, liste des photos, duplication |
 | `modeles/` | Modèle de détection livré avec le programme |
 | `verifier_installation.py` | Contrôle que l'installation est fonctionnelle |
 
@@ -302,7 +370,7 @@ Les règles de conception du projet sont consignées dans `CLAUDE.md`.
 
 ---
 
-## 10. Questions courantes
+## 11. Questions courantes
 
 **Le passage d'une photo à l'autre est-il rapide ?**
 Oui. Pendant que vous regardez une photo, les suivantes sont déjà lues en

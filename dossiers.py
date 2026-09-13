@@ -1,11 +1,12 @@
 """
-Operations sur les dossiers : choix, nommage et duplication.
+Operations sur les dossiers : choix, nommage, contenu et duplication.
 
-Ce module regroupe trois besoins qui portent tous sur des dossiers :
+Ce module regroupe quatre besoins qui portent tous sur des dossiers :
 
 1. verifier qu'un nom peut servir de nom de dossier ;
 2. demander un dossier a l'utilisateur sans que le programme « s'y installe » ;
-3. dupliquer un dossier de l'evenement, avec un decompte d'avancement.
+3. lister les photos d'un dossier dans l'ordre de leurs numeros ;
+4. dupliquer un dossier de l'evenement, avec un decompte d'avancement.
 
 La duplication sert surtout a garder les originaux intacts : on copie un dossier
 de tri avant de censurer l'un des deux exemplaires.
@@ -15,6 +16,8 @@ import os
 import shutil
 import tkinter as tk
 from tkinter import filedialog, ttk
+
+from images import est_une_image
 
 # Caracteres interdits dans un nom de dossier sous Windows.
 CARACTERES_INTERDITS = set('\\/:*?"<>|')
@@ -49,6 +52,23 @@ def choisir_dossier(titre, parent):
         os.chdir(dossier_courant)
 
     return os.path.normpath(choisi) if choisi else ""
+
+
+def photos_du_dossier(chemin_dossier):
+    """Liste les images d'un dossier de tri, ordonnees par leur numero.
+
+    Sans ce tri par numero, « 10.jpg » passerait avant « 2.jpg ».
+    """
+    if not os.path.isdir(chemin_dossier):
+        return []
+    noms = [nom for nom in os.listdir(chemin_dossier)
+            if os.path.isfile(os.path.join(chemin_dossier, nom)) and est_une_image(nom)]
+
+    def numero(nom):
+        base = os.path.splitext(nom)[0]
+        return (0, int(base)) if base.isdigit() else (1, 0)
+
+    return sorted(noms, key=lambda nom: (numero(nom), nom))
 
 
 def nom_de_copie_disponible(dossier_evenement, nom_dossier):

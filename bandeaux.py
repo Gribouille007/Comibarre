@@ -10,6 +10,8 @@ l'ecran et pour l'incrustation definitive dans le fichier enregistre.
 
 import math
 
+from PIL import Image, ImageDraw
+
 # Proportions du bandeau par rapport a l'ecartement des deux yeux.
 # Un bandeau doit deborder franchement de part et d'autre des yeux pour que la
 # personne ne soit plus identifiable, sans pour autant couvrir tout le visage.
@@ -26,6 +28,10 @@ RAPPORT_EPAISSEUR_MANUELLE = 0.35     # epaisseur = 35 % de la longueur
 # Distance, en pixels ecran, en dessous de laquelle on considere que la souris
 # est posee sur une poignee.
 RAYON_POIGNEE = 7
+
+# Le bandeau est dessine sur un masque 4 fois plus grand, puis reduit, pour
+# lisser ses bords obliques (voir remplir_polygone_lisse).
+SURECHANTILLONNAGE = 4
 
 
 class Bandeau:
@@ -167,9 +173,9 @@ class Bandeau:
     # Dessin definitif
     # ------------------------------------------------------------------
 
-    def dessiner(self, dessin):
-        """Incruste le bandeau dans l'image, via un objet ImageDraw de Pillow."""
-        dessin.polygon(self.coins(), fill=(0, 0, 0))
+    def dessiner(self, image):
+        """Incruste le bandeau dans une image Pillow, avec des bords lisses."""
+        remplir_polygone_lisse(image, self.coins())
 
     # ------------------------------------------------------------------
     # Enregistrement dans le fichier de suivi
@@ -189,6 +195,45 @@ class Bandeau:
     def depuis_dictionnaire(cls, donnees):
         return cls(donnees["centre_x"], donnees["centre_y"], donnees["longueur"],
                    donnees["epaisseur"], donnees["angle"], donnees["manuel"])
+
+
+def remplir_polygone_lisse(image, points):
+    """Remplit de noir un polygone dans l'image, avec des bords lisses.
+
+    Un bandeau incline a des bords obliques. Dessines tels quels, pixel par
+    pixel, ces bords forment des marches d'escalier : chaque pixel est soit
+    entierement noir, soit pas du tout. Pour les lisser :
+
+    1. on dessine le polygone sur un masque SURECHANTILLONNAGE fois plus grand,
+       limite au rectangle qui entoure le bandeau (inutile de traiter toute la
+       photo) ;
+    2. on reduit ce masque a la taille reelle en faisant la moyenne des petits
+       pixels : un pixel du bord recouvert a moitie par le bandeau devient a
+       moitie noir ;
+    3. on peint le noir a travers ce masque.
+
+    L'interieur du bandeau reste entierement noir : seuls les pixels du bord
+    sont adoucis, ce qui ne laisse rien deviner des yeux.
+
+    `points` est la liste des sommets, en pixels de l'image.
+    """
+    # Rectangle entourant le polygone, elargi d'un pixel et limite a l'image.
+    gauche = max(0, math.floor(min(x for x, _ in points)) - 1)
+    haut = max(0, math.floor(min(y for _, y in points)) - 1)
+    droite = min(image.width, math.ceil(max(x for x, _ in points)) + 1)
+    bas = min(image.height, math.ceil(max(y for _, y in points)) + 1)
+    if droite <= gauche or bas <= haut:
+        return      # bandeau entierement hors de l'image
+
+    echelle = SURECHANTILLONNAGE
+    masque = Image.new("L", ((droite - gauche) * echelle, (bas - haut) * echelle), 0)
+    points_agrandis = [((x - gauche) * echelle, (y - haut) * echelle) for x, y in points]
+    ImageDraw.Draw(masque).polygon(points_agrandis, fill=255)
+
+    # BOX fait la moyenne exacte de chaque groupe de petits pixels : on obtient
+    # la part de chaque pixel reel recouverte par le bandeau.
+    masque = masque.resize((droite - gauche, bas - haut), Image.BOX)
+    image.paste("black", (gauche, haut, droite, bas), masque)
 
 
 def poignee_sous_la_souris(bandeau, x, y, tolerance):
