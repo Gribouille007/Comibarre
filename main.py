@@ -20,6 +20,7 @@ import dossiers
 import preparation
 from censure import lancer_censure
 from configuration import demander_configuration
+from polices import police
 from revue import lancer_revue
 from suivi import Suivi
 from tri import lancer_tri
@@ -41,7 +42,7 @@ class EcranDemarrage:
         cadre.grid(row=0, column=0)
 
         ttk.Label(cadre, text="Tri et censure de photos",
-                  font=("Segoe UI", 14, "bold")).grid(row=0, column=0, pady=(0, 4))
+                  font=police(14, gras=True)).grid(row=0, column=0, pady=(0, 4))
         ttk.Label(cadre, text="Que voulez-vous faire ?",
                   foreground="#555555").grid(row=1, column=0, pady=(0, 16))
 
@@ -148,7 +149,7 @@ class MenuPrincipal:
         cadre.grid(row=0, column=0)
 
         ttk.Label(cadre, text=suivi.nom_evenement,
-                  font=("Segoe UI", 14, "bold")).grid(row=0, column=0, sticky="w")
+                  font=police(14, gras=True)).grid(row=0, column=0, sticky="w")
         self.etiquette_etat = ttk.Label(cadre, text="", foreground="#555555",
                                         justify="left")
         self.etiquette_etat.grid(row=1, column=0, sticky="w", pady=(4, 16))
@@ -273,7 +274,7 @@ class MenuPrincipal:
         cadre = ttk.Frame(boite, padding=20)
         cadre.grid(row=0, column=0)
         ttk.Label(cadre, text=question,
-                  font=("Segoe UI", 10, "bold")).grid(row=0, column=0, pady=(0, 12))
+                  font=police(10, gras=True)).grid(row=0, column=0, pady=(0, 12))
 
         def choisir(nom):
             choix["dossier"] = nom

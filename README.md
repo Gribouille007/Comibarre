@@ -10,16 +10,39 @@ connexion internet nécessaire.
 
 ---
 
-## 1. Installation
+## 1. Installation et lancement
 
-### Ce qu'il vous faut
+Le logiciel fonctionne sur **Windows, macOS et Linux**.
 
-- **Python 3.11 ou supérieur** (développé et vérifié sous Python 3.14).
-  Tkinter, l'interface graphique, est fourni d'origine avec Python.
+### La manière simple : un double-clic
 
-### Les commandes
+| Système | Fichier à double-cliquer |
+|---|---|
+| **Windows** | `lancer.bat` |
+| **macOS** | `lancer.command` |
+| **Linux** | `lancer.sh` |
 
-Dans un terminal, placez-vous dans le dossier du programme, puis :
+Au **premier** lancement, une fenêtre de terminal s'ouvre et le programme
+s'installe tout seul : il vérifie que Python est présent, crée son
+environnement isolé (le dossier `venv/`), télécharge les trois bibliothèques
+nécessaires, puis ouvre la fenêtre du logiciel. Comptez une minute.
+
+Aux lancements suivants, la fenêtre s'ouvre directement : rien n'est
+réinstallé.
+
+> **Si Python manque**, le script vous le dit et propose de l'installer :
+> par Homebrew sous macOS, par `winget` sous Windows, par le gestionnaire de
+> paquets de votre distribution sous Linux. Vous pouvez aussi refuser et
+> l'installer vous-même depuis <https://www.python.org/downloads/>.
+>
+> **Sous macOS et Linux**, si le double-clic ne fait rien, il faut autoriser
+> une seule fois l'exécution, depuis un terminal placé dans le dossier :
+> `chmod +x lancer.sh lancer.command`
+
+### La manière manuelle
+
+Si vous préférez tout faire à la main, ou si vous travaillez déjà dans un
+terminal :
 
 **Windows**
 
@@ -27,6 +50,7 @@ Dans un terminal, placez-vous dans le dossier du programme, puis :
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
+python main.py
 ```
 
 **macOS / Linux**
@@ -35,7 +59,22 @@ pip install -r requirements.txt
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+python main.py
 ```
+
+Il existe aussi un intermédiaire, qui installe ce qu'il faut puis lance le
+logiciel, sans passer par les fichiers `lancer.*` :
+
+```
+python demarrer.py
+```
+
+### Ce qu'il vous faut
+
+- **Python 3.11 ou supérieur** (développé et vérifié sous Python 3.14).
+  Tkinter, l'interface graphique, est fourni d'origine avec Python — sauf sur
+  certaines distributions Linux, où il faut ajouter `python3-tk`. Le programme
+  vous le signale clairement le cas échéant.
 
 Trois bibliothèques sont installées :
 
@@ -53,21 +92,33 @@ livré avec le programme. **Rien n'est téléchargé au lancement.**
 Avant de traiter de vraies photos, lancez une fois :
 
 ```
-python verifier_installation.py
+python demarrer.py --verifier
 ```
 
-Ce script contrôle en quelques secondes que Python, les quatre bibliothèques et
+Ce script contrôle en quelques secondes que Python, les bibliothèques et
 le modèle de détection sont en place, que les formats JPEG, PNG et HEIC sont bien
 lus **et** réenregistrés, et que les bandeaux s'inclinent correctement. Il
 fabrique ses propres images de test et **ne touche à aucun de vos fichiers**.
 
+Un second jeu de tests vérifie la **géométrie du bandeau** — couvre-t-il bien
+les yeux, sans monter inutilement sur le front ?
+
+```
+python tester_bandeau.py
+```
+
+### En cas de problème
+
+```
+python demarrer.py --reinstaller
+```
+
+efface le dossier `venv/` et refait l'installation depuis zéro. Vos photos et
+votre avancement ne sont pas touchés.
+
 ---
 
-## 2. Lancement
-
-```
-python main.py
-```
+## 2. Démarrage d'une session
 
 Au démarrage, deux possibilités :
 
@@ -233,8 +284,9 @@ position des deux yeux.
 
 ### Poser un bandeau
 
-- **Cliquez sur la tête d'une personne** : un bandeau noir apparaît sur ses yeux.
-- **Cliquez à nouveau sur la même personne** : le bandeau disparaît.
+- **Cliquez sur la tête d'une personne** : un bandeau noir apparaît sur ses
+  yeux, entouré de ses poignées.
+- **Double-cliquez sur un bandeau** : il disparaît.
 
 Chaque personne est indépendante : vous pouvez masquer certains visages et en
 laisser d'autres visibles. Le bandeau **épouse l'inclinaison de la tête** : il
@@ -242,30 +294,39 @@ s'aligne sur la ligne qui joint les deux yeux. Ses bords sont lissés : même
 incliné, il ne présente pas de marches d'escalier, à l'écran comme dans le
 fichier enregistré.
 
+Son épaisseur est calculée pour **couvrir entièrement les yeux sans monter sur
+le front**. C'est la plus petite épaisseur qui convienne à toutes les
+morphologies : elle est mesurée, et le calcul est refait à chaque fois que vous
+lancez `python tester_bandeau.py`.
+
 ### Quand la détection échoue
 
 Si une personne n'a pas été détectée (visage de profil, lunettes de soleil, yeux
 fermés…), **cliquez à l'endroit de ses yeux** : un bandeau de taille standard
-apparaît, entouré de poignées bleues.
+apparaît au même endroit.
+
+### Retoucher un bandeau
+
+**Tous** les bandeaux se retouchent, qu'ils aient été posés à la main ou par la
+détection. Un clic sur un bandeau le **choisit** : son contour blanc et ses
+cinq poignées apparaissent.
 
 | Manipulation | Effet |
 |---|---|
-| Glisser le **centre** du bandeau | Le déplacer |
-| Glisser la poignée **carrée de droite** | Modifier sa longueur |
-| Glisser la poignée **carrée du bas** | Modifier son épaisseur |
-| Glisser la poignée **ronde du dessus** | Le faire pivoter |
-| **Cliquer dessus sans le déplacer** | Le retirer |
+| **Cliquer** sur un bandeau | Le choisir, sans rien changer d'autre |
+| **Glisser** le corps du bandeau | Le déplacer |
+| Glisser une poignée **de gauche ou de droite** | Modifier sa longueur |
+| Glisser une poignée **du haut ou du bas** | Modifier son épaisseur |
+| Glisser la poignée **bleue, au bout du fil** | Le faire pivoter |
+| **Double-cliquer** sur un bandeau | Le retirer |
 
-### Commandes de la censure
+Les poignées vont par paires, une de chaque côté : prenez celle qui tombe sous
+votre souris. La forme du pointeur indique ce que vous vous apprêtez à saisir,
+et la poignée survolée se met en avant.
 
-| Touche ou action | Effet |
-|---|---|
-| **Clic gauche** | Poser ou retirer un bandeau |
-| **Entrée** | Incruster les bandeaux, enregistrer la photo sur place, passer à la suivante |
-| **Barre d'espace** ou **flèche droite** | Passer à la photo suivante sans la modifier |
-| **Flèche gauche** | Revenir à la photo précédente sans rien enregistrer (les bandeaux non validés sont abandonnés) |
-| **Retour arrière** | Annuler la dernière validation : la photo d'origine est restaurée et réaffichée |
-| **Échap** | Enregistrer l'avancement, vider le dossier temporaire et fermer |
+> Un bandeau se retire **uniquement** par un double-clic. Un simple clic ne
+> l'efface jamais : c'est ce qui permet d'attraper une poignée, ou de déplacer
+> un bandeau, sans risquer de le faire disparaître par mégarde.
 
 ### Ce qui est enregistré, et quand
 
@@ -359,12 +420,17 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 | `rognage.py` | Écriture d'une photo rognée sur le disque |
 | `censure.py` | Étape 2 : affichage, clics, validation, annulation |
 | `bandeaux.py` | Géométrie du bandeau : inclinaison, poignées, dessin aux bords lisses |
+| `selection.py` | Habillage du bandeau choisi : contour et poignées, tracés lissés |
 | `visages.py` | Détection des visages et des yeux |
 | `images.py` | Lecture, orientation, enregistrement, chargement anticipé |
 | `suivi.py` | Fichier de suivi : enregistrement et reprise |
 | `dossiers.py` | Choix d'un dossier, noms valides, liste des photos, duplication |
+| `polices.py` | Police de caractères du système, la même partout |
 | `modeles/` | Modèle de détection livré avec le programme |
+| `demarrer.py` | Installation automatique des bibliothèques, puis lancement |
+| `lancer.bat`, `lancer.command`, `lancer.sh` | Lancement par double-clic sous Windows, macOS et Linux |
 | `verifier_installation.py` | Contrôle que l'installation est fonctionnelle |
+| `tester_bandeau.py` | Vérifie que le bandeau couvre les yeux, et rien de plus |
 
 Les règles de conception du projet sont consignées dans `CLAUDE.md`.
 
@@ -392,6 +458,17 @@ le bouton **Quitter** du menu (ou par Échap) : le programme relâche alors tous
 les fichiers et se termine pour de bon. Si un message d'erreur inattendu
 apparaît, fermez-le puis quittez normalement — le menu revient toujours à
 l'écran, même après une erreur.
+
+**Le bandeau disparaît quand j'essaie de le retoucher.**
+C'était un défaut, corrigé : un simple clic ne retire plus jamais un bandeau,
+il le choisit. Seul le **double-clic** en retire un.
+
+**Le bandeau laisse voir un bout d'œil sur certaines photos.**
+Son épaisseur est au plus juste, pour ne pas couvrir le front. Cliquez sur le
+bandeau, puis tirez la poignée du haut ou du bas pour l'épaissir sur cette
+photo-là. Si le cas se répète, la valeur générale se règle dans `bandeaux.py`
+(`FACTEUR_EPAISSEUR`) ; `python tester_bandeau.py` dit aussitôt si la nouvelle
+valeur couvre encore tous les yeux.
 
 **Puis-je récupérer une photo mise dans « À supprimer » ?**
 Oui : le logiciel ne supprime jamais aucun fichier. Il ne fait que les déplacer.

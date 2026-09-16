@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from dossiers import choisir_dossier, nom_de_dossier_valide
+from polices import police
 
 # Valeurs proposees par defaut, que l'utilisateur peut modifier librement.
 DOSSIERS_PAR_DEFAUT = [
@@ -54,7 +55,7 @@ class EcranConfiguration:
         cadre.grid(row=0, column=0, sticky="nsew")
 
         ttk.Label(cadre, text="Configuration d'un nouvel evenement",
-                  font=("Segoe UI", 12, "bold")).grid(row=0, column=0, columnspan=3,
+                  font=police(12, gras=True)).grid(row=0, column=0, columnspan=3,
                                                       sticky="w", pady=(0, 12))
 
         # -- dossier source --

@@ -20,6 +20,8 @@ import tkinter as tk
 
 from PIL import Image, ImageEnhance, ImageTk
 
+from polices import police
+
 # Bornes du zoom. 1.0 correspond a la photo entiere ajustee a la fenetre.
 ZOOM_MINIMUM = 1.0
 ZOOM_MAXIMUM = 8.0
@@ -82,7 +84,12 @@ class Visionneuse:
         self.depart_cadre = None
         self.cadre = None             # (gauche, haut, droite, bas) ou None
 
+        # La molette : Windows et macOS envoient <MouseWheel> avec un sens dans
+        # `delta` ; X11, donc la plupart des Linux, envoie plutot un clic du
+        # bouton 4 (vers le haut) ou 5 (vers le bas). On branche les trois.
         self.canvas.bind("<MouseWheel>", self._molette)
+        self.canvas.bind("<Button-4>", lambda evenement: self._molette(evenement, 1))
+        self.canvas.bind("<Button-5>", lambda evenement: self._molette(evenement, -1))
         self.canvas.bind("<Button-1>", self._souris_pressee)
         self.canvas.bind("<B1-Motion>", self._souris_glissee)
         self.canvas.bind("<ButtonRelease-1>", self._souris_relachee)
@@ -301,7 +308,7 @@ class Visionneuse:
         if self.image is None:
             self.canvas.create_text(largeur_canvas // 2, hauteur_canvas // 2,
                                     text=self.message, fill=self.couleur_message,
-                                    font=("Segoe UI", 16), justify="center")
+                                    font=police(16), justify="center")
             return
 
         facteur = self._facteur()
@@ -453,12 +460,15 @@ class Visionneuse:
     # Zoom
     # ------------------------------------------------------------------
 
-    def _molette(self, evenement):
+    def _molette(self, evenement, sens=None):
+        """Zoome ou dezoome. `sens` vaut 1 ou -1 quand l'evenement ne le dit pas."""
         # Pendant le rognage, la photo reste entiere a l'ecran : le cadre se
         # trace ainsi toujours sur la photo complete.
         if self.image is None or self.en_rognage:
             return
-        self._zoomer(PAS_DE_ZOOM if evenement.delta > 0 else 1 / PAS_DE_ZOOM)
+        if sens is None:
+            sens = 1 if evenement.delta > 0 else -1
+        self._zoomer(PAS_DE_ZOOM if sens > 0 else 1 / PAS_DE_ZOOM)
 
     def _zoomer(self, multiplicateur):
         """Change le zoom en gardant au centre le meme point de la photo."""

@@ -12,11 +12,22 @@ import math
 
 from PIL import Image, ImageDraw
 
-# Proportions du bandeau par rapport a l'ecartement des deux yeux.
-# Un bandeau doit deborder franchement de part et d'autre des yeux pour que la
-# personne ne soit plus identifiable, sans pour autant couvrir tout le visage.
+# Proportions du bandeau par rapport a l'ecartement des deux yeux (la distance
+# entre les deux pupilles). Toutes les mesures du visage humain se rapportent
+# bien a cet ecart : un bandeau defini ainsi garde la meme allure sur un enfant
+# comme sur un adulte, de pres comme de loin.
+#
+# La longueur, 2,2 fois l'ecart des yeux, couvre le visage d'une tempe a
+# l'autre : la personne n'est plus identifiable.
+#
+# L'epaisseur, 0,40 fois l'ecart des yeux, a ete etablie par mesure : c'est la
+# plus petite valeur qui couvre entierement les yeux de toutes les morphologies
+# examinees, sourcils compris ou non selon les visages, sans monter sur le
+# front. Elle valait 0,8 auparavant, ce qui couvrait systematiquement les
+# sourcils et une partie du front. Le detail des mesures et la maniere de les
+# refaire sont dans tester_bandeau.py.
 FACTEUR_LONGUEUR = 2.2
-FACTEUR_EPAISSEUR = 0.8
+FACTEUR_EPAISSEUR = 0.40
 EPAISSEUR_MINIMALE = 6
 
 # Taille d'un bandeau cree a la main, quand la detection a echoue (section 9.4).
@@ -128,20 +139,34 @@ class Bandeau:
         return (abs(local_x) <= self.longueur / 2 + marge
                 and abs(local_y) <= self.epaisseur / 2 + marge)
 
-    def poignees(self):
+    def poignees(self, marge_rotation):
         """Les poignees de manipulation, en coordonnees photo (section 9.4).
 
-        - "longueur"  : au milieu du bord droit, pour allonger ou raccourcir ;
-        - "epaisseur" : au milieu du bord bas, pour epaissir ou affiner ;
-        - "rotation"  : au-dessus du bandeau, pour l'incliner.
+        - "longueur_droite" et "longueur_gauche" : aux deux bouts du bandeau,
+          pour l'allonger ou le raccourcir ;
+        - "epaisseur_haut" et "epaisseur_bas" : au milieu des grands bords,
+          pour l'epaissir ou l'affiner ;
+        - "rotation" : un peu au-dessus du bandeau, pour l'incliner.
+
+        Les poignees vont par paires, une de chaque cote : l'utilisateur peut
+        ainsi saisir celle qui tombe sous sa souris sans avoir a contourner la
+        photo. Tirer l'une ou l'autre revient au meme, car le bandeau grandit
+        toujours de part et d'autre de son centre : il reste donc pose sur les
+        yeux, quel que soit le bout que l'on tire.
+
+        `marge_rotation` est la distance, en pixels de la photo, entre le bord
+        du bandeau et la poignee de rotation. L'appelant la calcule a partir du
+        facteur d'affichage, pour que cette poignee reste toujours a la meme
+        distance a l'ecran, quel que soit le zoom.
         """
         demi_longueur = self.longueur / 2
         demi_epaisseur = self.epaisseur / 2
-        distance_rotation = demi_epaisseur + max(self.epaisseur, 18)
         return {
-            "longueur": self._vers_repere_photo(demi_longueur, 0),
-            "epaisseur": self._vers_repere_photo(0, demi_epaisseur),
-            "rotation": self._vers_repere_photo(0, -distance_rotation),
+            "longueur_droite": self._vers_repere_photo(demi_longueur, 0),
+            "longueur_gauche": self._vers_repere_photo(-demi_longueur, 0),
+            "epaisseur_bas": self._vers_repere_photo(0, demi_epaisseur),
+            "epaisseur_haut": self._vers_repere_photo(0, -demi_epaisseur),
+            "rotation": self._vers_repere_photo(0, -(demi_epaisseur + marge_rotation)),
         }
 
     # ------------------------------------------------------------------
@@ -152,14 +177,26 @@ class Bandeau:
         self.centre_x += dx
         self.centre_y += dy
 
+    def limiter_au_cadre(self, largeur, hauteur):
+        """Empeche le bandeau de sortir entierement de la photo.
+
+        Sans cette limite, un glissement un peu vif peut emporter le bandeau
+        au-dela du bord : il n'est alors plus dessine nulle part et semble
+        avoir disparu, alors qu'il est toujours la. On garde donc toujours son
+        centre a l'interieur de la photo.
+        """
+        self.centre_x = min(max(self.centre_x, 0), largeur)
+        self.centre_y = min(max(self.centre_y, 0), hauteur)
+
     def tirer_poignee(self, nom_poignee, x, y):
         """Applique le deplacement d'une poignee jusqu'au point (x, y)."""
         local_x, local_y = self._vers_repere_local(x, y)
 
-        if nom_poignee == "longueur":
-            # La poignee est au bord droit : la demi-longueur suit la souris.
+        if nom_poignee.startswith("longueur"):
+            # La poignee est a un bout du bandeau : la demi-longueur suit la
+            # souris, des deux cotes a la fois (le centre ne bouge pas).
             self.longueur = max(abs(local_x) * 2, EPAISSEUR_MINIMALE * 2)
-        elif nom_poignee == "epaisseur":
+        elif nom_poignee.startswith("epaisseur"):
             self.epaisseur = max(abs(local_y) * 2, EPAISSEUR_MINIMALE)
         elif nom_poignee == "rotation":
             # L'angle vise est celui du vecteur allant du centre vers la souris.
@@ -236,14 +273,21 @@ def remplir_polygone_lisse(image, points):
     image.paste("black", (gauche, haut, droite, bas), masque)
 
 
-def poignee_sous_la_souris(bandeau, x, y, tolerance):
+def poignee_sous_la_souris(bandeau, x, y, tolerance, marge_rotation):
     """Renvoie le nom de la poignee situee sous le point, ou None.
 
     `tolerance` est exprimee en pixels de la photo : l'appelant la calcule a
     partir du facteur d'affichage, pour que la zone sensible garde toujours la
     meme taille a l'ecran quel que soit le zoom.
+
+    Sur un bandeau tres fin, deux poignees peuvent se recouvrir : on retient
+    alors la plus proche du point, celle que l'utilisateur visait.
     """
-    for nom, (poignee_x, poignee_y) in bandeau.poignees().items():
-        if math.hypot(x - poignee_x, y - poignee_y) <= tolerance:
-            return nom
-    return None
+    meilleure = None
+    meilleure_distance = tolerance
+    for nom, (poignee_x, poignee_y) in bandeau.poignees(marge_rotation).items():
+        distance = math.hypot(x - poignee_x, y - poignee_y)
+        if distance <= meilleure_distance:
+            meilleure = nom
+            meilleure_distance = distance
+    return meilleure

@@ -1,12 +1,23 @@
 # Dépendances du logiciel de tri et de censure de photos.
 # Python 3.11 ou supérieur (développé et vérifié sous Python 3.14.6).
+# Fonctionne sous Windows, macOS et Linux.
 #
-# Installation :
+# Installation automatique (la plus simple) :
+#   double-cliquez sur lancer.bat (Windows), lancer.command (macOS),
+#   lancer.sh (Linux) — ou lancez : python demarrer.py
+#
+# Installation manuelle :
 #   python -m venv venv
 #   venv\Scripts\activate          (Windows)
+#   source venv/bin/activate       (macOS, Linux)
 #   pip install -r requirements.txt
 #
+# Les versions sont figées pour que l'installation soit toujours identique.
+# Si l'une d'elles n'existe pas pour votre système ou votre version de Python,
+# demarrer.py réessaie automatiquement avec les versions les plus récentes.
+#
 # Tkinter n'apparaît pas ici : il est fourni d'origine avec Python.
+# Sous Linux, il faut parfois l'ajouter séparément (paquet python3-tk).
 
 # Lecture, redimensionnement et enregistrement des images ;
 # dessin des bandeaux noirs (y compris inclinés).

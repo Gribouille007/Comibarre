@@ -4,7 +4,8 @@ Verification de l'installation.
 A lancer une fois apres l'installation des bibliotheques, pour s'assurer que
 tout est en place avant de traiter de vraies photos :
 
-    python verifier_installation.py
+    python demarrer.py --verifier     (installe d'abord ce qui manque)
+    python verifier_installation.py   (si tout est deja installe)
 
 Le script n'a besoin d'aucune photo : il fabrique lui-meme ses images de test
 dans un dossier temporaire, qu'il efface ensuite. Il ne touche a aucun de vos
@@ -232,7 +233,8 @@ def main():
         return 1
 
     print("Les %d verifications passent. L'installation est fonctionnelle." % len(resultats))
-    print("\nVous pouvez lancer le logiciel avec :   python main.py")
+    print("\nVous pouvez lancer le logiciel en double-cliquant sur :")
+    print("    lancer.bat (Windows), lancer.command (macOS), lancer.sh (Linux)")
     return 0
 
 

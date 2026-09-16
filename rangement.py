@@ -22,6 +22,7 @@ from tkinter import messagebox
 
 from ecritures import EcrituresEnArrierePlan, signaler_les_echecs
 from images import ChargeurAnticipe, copie_de_sauvegarde, fabriquer_apercu
+from polices import police
 from rognage import rogner_fichier, rogner_image
 from visionneuse import Visionneuse
 
@@ -93,7 +94,7 @@ class FenetreRangement:
         self.visionneuse.canvas.bind("<Configure>", self._zone_d_affichage_changee, add="+")
 
         self.etiquette_avancement = tk.Label(barre, text="", bg=COULEUR_BARRE,
-                                             fg=COULEUR_TEXTE, font=("Segoe UI", 11, "bold"),
+                                             fg=COULEUR_TEXTE, font=police(11, gras=True),
                                              anchor="w", padx=10)
         self.etiquette_avancement.pack(side="top", fill="x", pady=(6, 0))
 
@@ -103,7 +104,7 @@ class FenetreRangement:
                        "Retour arriere = annuler  |  R = pivoter  |  C = rogner  |  "
                        "Echap = quitter")
         self.etiquette_rappel = tk.Label(barre, text=self.rappel, bg=COULEUR_BARRE,
-                                         fg=COULEUR_RAPPEL, font=("Segoe UI", 9),
+                                         fg=COULEUR_RAPPEL, font=police(9),
                                          anchor="w", padx=10)
         self.etiquette_rappel.pack(side="top", fill="x", pady=(0, 6))
 

@@ -17,23 +17,40 @@ import tkinter as tk
 
 from PIL import Image, ImageTk
 
-import bandeaux as module_bandeaux
+import selection
 from bandeaux import Bandeau, poignee_sous_la_souris, remplir_polygone_lisse
 from dossiers import photos_du_dossier
 from ecritures import EcrituresEnArrierePlan, signaler_les_echecs
 from images import (ChargeurAnticipe, charger_image, copie_de_sauvegarde,
                     enregistrer_au_format_origine, format_origine)
+from polices import police
 from visages import DetecteurVisages, DetectionAnticipee, visage_le_plus_proche
 
 COULEUR_FOND = "#1e1e1e"
 COULEUR_TEXTE = "#f0f0f0"
 COULEUR_ERREUR = "#ff8080"
-COULEUR_SELECTION = "#00d0ff"
 
 # Deplacement, en pixels ecran, en dessous duquel on considere que l'utilisateur
-# a clique et non fait glisser. Sert a distinguer « retirer le bandeau » de
-# « deplacer le bandeau » (section 9.4).
+# a clique et non fait glisser. Sert a distinguer « selectionner un bandeau »
+# de « deplacer un bandeau » (section 9.4).
 SEUIL_DE_GLISSEMENT = 4
+
+# Distances en pixels ecran, independantes du zoom.
+TOLERANCE_POIGNEE = 11      # rayon de la zone sensible autour d'une poignee
+MARGE_PRISE = 3             # debord accepte autour d'un bandeau, pour le saisir
+MARGE_ROTATION = 30         # distance entre le bord du bandeau et sa poignee de rotation
+
+# Forme du pointeur selon ce qui se trouve dessous. Tk traduit ces noms sur
+# chaque systeme ; si l'un d'eux manque, on retombe sur la fleche ordinaire.
+POINTEURS = {
+    None: "",
+    "corps": "fleur",
+    "longueur_droite": "sb_h_double_arrow",
+    "longueur_gauche": "sb_h_double_arrow",
+    "epaisseur_haut": "sb_v_double_arrow",
+    "epaisseur_bas": "sb_v_double_arrow",
+    "rotation": "exchange",
+}
 
 # Delai, en millisecondes, avant de regarder de nouveau si une photo qui
 # n'etait pas encore prete l'est enfin.
@@ -83,6 +100,8 @@ class FenetreCensure:
         self.poignee_active = None
         self.point_presse = None
         self.a_glisse = False
+        self.double_clic_en_cours = False
+        self.survol = None           # nom de poignee, "corps", ou None
 
         # Dessin differe et attente du chargement (voir _demander_dessin et
         # _montrer_des_que_prete).
@@ -130,21 +149,25 @@ class FenetreCensure:
 
         self.etiquette_avancement = tk.Label(barre, text="", bg="#2b2b2b",
                                              fg=COULEUR_TEXTE,
-                                             font=("Segoe UI", 11, "bold"),
+                                             font=police(11, gras=True),
                                              anchor="w", padx=10, pady=6)
         self.etiquette_avancement.pack(side="left")
 
-        rappel = ("Clic = poser/retirer un bandeau  |  Entree = enregistrer  |  "
+        rappel = ("Clic = poser ou choisir un bandeau  |  "
+                  "Double-clic = le retirer  |  Entree = enregistrer  |  "
                   "Espace ou → = passer  |  ← = precedente  |  "
                   "Retour arriere = annuler  |  Echap = quitter")
         tk.Label(barre, text=rappel, bg="#2b2b2b", fg="#b8b8b8",
-                 font=("Segoe UI", 9), anchor="e", padx=10).pack(side="right")
+                 font=police(9), anchor="e", padx=10).pack(side="right")
 
     def _brancher_commandes(self):
         self.fenetre.bind("<Key>", self._touche)
         self.canvas.bind("<Button-1>", self._souris_pressee)
+        self.canvas.bind("<Double-Button-1>", self._double_clic)
         self.canvas.bind("<B1-Motion>", self._souris_glissee)
         self.canvas.bind("<ButtonRelease-1>", self._souris_relachee)
+        self.canvas.bind("<Motion>", self._souris_bougee)
+        self.canvas.bind("<Leave>", lambda evenement: self._changer_survol(None))
         self.canvas.bind("<Configure>", self._zone_d_affichage_changee)
         self.fenetre.focus_force()
 
@@ -180,11 +203,6 @@ class FenetreCensure:
         decalage_x, decalage_y = self._decalage(facteur)
         return ((x_ecran - decalage_x) / facteur, (y_ecran - decalage_y) / facteur)
 
-    def _vers_ecran(self, x_photo, y_photo):
-        facteur = self._facteur()
-        decalage_x, decalage_y = self._decalage(facteur)
-        return (x_photo * facteur + decalage_x, y_photo * facteur + decalage_y)
-
     # ------------------------------------------------------------------
     # Affichage
     # ------------------------------------------------------------------
@@ -206,6 +224,7 @@ class FenetreCensure:
         self.bandeaux_visages = {}
         self.bandeaux_manuels = []
         self.bandeau_selectionne = None
+        self._changer_survol(None)
 
         self.chargeur.avancer(self.position)
         self.detection.avancer(self.position)
@@ -281,7 +300,7 @@ class FenetreCensure:
         if self.image is None:
             self.canvas.create_text(largeur_canvas // 2, hauteur_canvas // 2,
                                     text=self.message, fill=self.couleur_message,
-                                    font=("Segoe UI", 16), justify="center")
+                                    font=police(16), justify="center")
             return
 
         facteur = self._facteur()
@@ -303,30 +322,21 @@ class FenetreCensure:
             remplir_polygone_lisse(affichee, [(x * facteur, y * facteur)
                                               for x, y in bandeau.coins()])
 
+        # L'habillage du bandeau choisi (contour et poignees) est peint dans
+        # cette meme image, et non trace sur le canvas : Tkinter ne sait pas
+        # lisser ses traits, alors que Pillow le fait (voir selection.py).
+        if self.bandeau_selectionne is not None:
+            bandeau = self.bandeau_selectionne
+            selection.dessiner_habillage(
+                affichee,
+                [(x * facteur, y * facteur) for x, y in bandeau.coins()],
+                {nom: (x * facteur, y * facteur)
+                 for nom, (x, y) in bandeau.poignees(self._marge_rotation()).items()},
+                self.survol if self.survol != "corps" else None)
+
         self.photo_tk = ImageTk.PhotoImage(affichee)
         decalage_x, decalage_y = self._decalage(facteur)
         self.canvas.create_image(decalage_x, decalage_y, anchor="nw", image=self.photo_tk)
-
-        if self.bandeau_selectionne is not None:
-            self._dessiner_poignees(self.bandeau_selectionne)
-
-    def _dessiner_poignees(self, bandeau):
-        """Entoure le bandeau manuel selectionne et montre ses poignees (section 9.4)."""
-        points = [self._vers_ecran(x, y) for x, y in bandeau.coins()]
-        self.canvas.create_polygon(points, fill="", outline=COULEUR_SELECTION, width=2)
-
-        for nom, (x_photo, y_photo) in bandeau.poignees().items():
-            x, y = self._vers_ecran(x_photo, y_photo)
-            rayon = module_bandeaux.RAYON_POIGNEE
-            if nom == "rotation":
-                centre_x, centre_y = self._vers_ecran(bandeau.centre_x, bandeau.centre_y)
-                self.canvas.create_line(centre_x, centre_y, x, y,
-                                        fill=COULEUR_SELECTION, dash=(3, 3))
-                self.canvas.create_oval(x - rayon, y - rayon, x + rayon, y + rayon,
-                                        fill=COULEUR_SELECTION, outline="")
-            else:
-                self.canvas.create_rectangle(x - rayon, y - rayon, x + rayon, y + rayon,
-                                             fill=COULEUR_SELECTION, outline="")
 
     def _afficher_fin(self):
         self.image = None
@@ -341,6 +351,50 @@ class FenetreCensure:
     # Souris
     # ------------------------------------------------------------------
 
+    def _marge_rotation(self):
+        """Distance bord-poignee de rotation, convertie en pixels de la photo."""
+        return MARGE_ROTATION / max(self._facteur(), 0.0001)
+
+    def _bandeau_sous_le_point(self, x, y):
+        """Le bandeau situe sous un point de la photo, ou None.
+
+        Les bandeaux manuels sont examines en premier, et les plus recents
+        avant les plus anciens : ce sont ceux qui apparaissent au-dessus des
+        autres a l'ecran, et c'est donc celui-la que l'utilisateur vise quand
+        deux bandeaux se superposent.
+        """
+        marge = MARGE_PRISE / max(self._facteur(), 0.0001)
+        for bandeau in reversed(self.bandeaux_manuels):
+            if bandeau.contient(x, y, marge):
+                return bandeau
+        for bandeau in reversed(list(self.bandeaux_visages.values())):
+            if bandeau.contient(x, y, marge):
+                return bandeau
+        return None
+
+    def _bandeau_du_visage_vise(self, x, y):
+        """Le bandeau deja pose sur le visage que designe ce point, ou None.
+
+        Sert quand le clic tombe a cote du bandeau mais bien sur la tete :
+        c'est ce bandeau-la que l'utilisateur veut atteindre.
+        """
+        index_visage = visage_le_plus_proche(self.visages, x, y)
+        if index_visage is None:
+            return None
+        return self.bandeaux_visages.get(index_visage)
+
+    def _ce_qui_est_sous_le_point(self, x, y):
+        """Ce que designe un point de la photo : nom de poignee, "corps", ou None."""
+        if self.bandeau_selectionne is not None:
+            tolerance = TOLERANCE_POIGNEE / max(self._facteur(), 0.0001)
+            poignee = poignee_sous_la_souris(self.bandeau_selectionne, x, y,
+                                             tolerance, self._marge_rotation())
+            if poignee:
+                return poignee
+        if self._bandeau_sous_le_point(x, y) is not None:
+            return "corps"
+        return None
+
     def _souris_pressee(self, evenement):
         if self.image is None:
             return
@@ -350,23 +404,22 @@ class FenetreCensure:
         self.poignee_active = None
 
         x, y = self._vers_photo(evenement.x, evenement.y)
-        tolerance = module_bandeaux.RAYON_POIGNEE / max(self._facteur(), 0.0001)
 
-        # Une poignee du bandeau selectionne a la priorite sur tout le reste.
-        if self.bandeau_selectionne is not None:
-            poignee = poignee_sous_la_souris(self.bandeau_selectionne, x, y, tolerance)
-            if poignee:
-                self.action = "poignee"
-                self.poignee_active = poignee
-                return
+        # Une poignee du bandeau choisi a la priorite sur tout le reste.
+        vise = self._ce_qui_est_sous_le_point(x, y)
+        if vise is not None and vise != "corps":
+            self.action = "poignee"
+            self.poignee_active = vise
+            return
 
-        # Sinon, on regarde si le clic tombe sur un bandeau manuel existant.
-        for bandeau in reversed(self.bandeaux_manuels):
-            if bandeau.contient(x, y):
-                self.bandeau_selectionne = bandeau
-                self.action = "corps"
-                self._demander_dessin()
-                return
+        # Sinon, un clic sur un bandeau existant, detecte ou manuel, le choisit
+        # et permet de le deplacer. Il n'est jamais retire ici : c'est le
+        # double-clic qui retire (voir _double_clic).
+        bandeau = self._bandeau_sous_le_point(x, y)
+        if bandeau is not None:
+            self.bandeau_selectionne = bandeau
+            self.action = "corps"
+            self._demander_dessin()
 
     def _souris_glissee(self, evenement):
         if self.action is None or self.point_presse is None:
@@ -384,44 +437,53 @@ class FenetreCensure:
         elif self.action == "corps":
             ancien_x, ancien_y = self._vers_photo(depart_x, depart_y)
             self.bandeau_selectionne.deplacer(x - ancien_x, y - ancien_y)
+            # Un glissement trop vif ne doit pas emporter le bandeau hors de la
+            # photo, ou il ne serait plus visible nulle part.
+            self.bandeau_selectionne.limiter_au_cadre(self.image.width,
+                                                      self.image.height)
             self.point_presse = (evenement.x, evenement.y)
 
         self._demander_dessin()
 
     def _souris_relachee(self, evenement):
-        # Un glissement a deja produit son effet : il n'y a rien de plus a faire.
-        if self.a_glisse:
-            self.action = None
-            self.point_presse = None
-            return
+        """Termine la manipulation en cours, ou pose un bandeau la ou l'on a clique.
 
-        if self.image is not None:
-            self._clic(*self._vers_photo(evenement.x, evenement.y))
+        Un simple clic sur un bandeau ou sur une de ses poignees ne fait rien de
+        plus ici : le bandeau a deja ete choisi a l'enfoncement du bouton. C'est
+        important, car les poignees « longueur » et « epaisseur » sont posees
+        sur le bord meme du bandeau : les traiter comme un clic sur le bandeau
+        ferait disparaitre celui-ci des qu'on effleure une poignee.
+        """
+        if self.double_clic_en_cours:
+            # Le retrait vient d'etre fait par le double-clic : ce relachement
+            # est celui de son second clic, il ne doit rien poser de nouveau.
+            self.double_clic_en_cours = False
+        elif not self.a_glisse and self.action is None and self.image is not None:
+            self._clic_dans_le_vide(*self._vers_photo(evenement.x, evenement.y))
 
         self.action = None
+        self.poignee_active = None
         self.point_presse = None
+        self.a_glisse = False
 
-    def _clic(self, x, y):
-        """Applique la bascule : poser ou retirer un bandeau (sections 9.3 et 9.4)."""
-        # 1. Un clic sans deplacement sur un bandeau manuel le retire.
-        for bandeau in reversed(self.bandeaux_manuels):
-            if bandeau.contient(x, y):
-                self.bandeaux_manuels.remove(bandeau)
-                if self.bandeau_selectionne is bandeau:
-                    self.bandeau_selectionne = None
-                self._demander_dessin()
-                return
+    def _clic_dans_le_vide(self, x, y):
+        """Pose un bandeau la ou l'utilisateur a clique (sections 9.3 et 9.4)."""
+        # 1. Le clic tombe sur une tete detectee, mais a cote du bandeau deja
+        #    pose dessus : on choisit ce bandeau plutot que d'en creer un autre.
+        deja_pose = self._bandeau_du_visage_vise(x, y)
+        if deja_pose is not None:
+            self.bandeau_selectionne = deja_pose
+            self._demander_dessin()
+            return
 
-        # 2. Sinon, on rattache le clic au visage detecte correspondant.
+        # 2. Le clic est rattache au visage detecte correspondant : le bandeau
+        #    epouse alors l'inclinaison de la tete (section 9.3).
         index_visage = visage_le_plus_proche(self.visages, x, y)
         if index_visage is not None:
-            if index_visage in self.bandeaux_visages:
-                del self.bandeaux_visages[index_visage]      # second clic : on retire
-            else:
-                visage = self.visages[index_visage]
-                self.bandeaux_visages[index_visage] = Bandeau.depuis_yeux(
-                    visage.oeil_droit, visage.oeil_gauche)
-            self.bandeau_selectionne = None
+            visage = self.visages[index_visage]
+            nouveau = Bandeau.depuis_yeux(visage.oeil_droit, visage.oeil_gauche)
+            self.bandeaux_visages[index_visage] = nouveau
+            self.bandeau_selectionne = nouveau
             self._demander_dessin()
             return
 
@@ -429,6 +491,68 @@ class FenetreCensure:
         nouveau = Bandeau.manuel_par_defaut(x, y, self.image.width)
         self.bandeaux_manuels.append(nouveau)
         self.bandeau_selectionne = nouveau
+        self._demander_dessin()
+
+    def _double_clic(self, evenement):
+        """Retire le bandeau double-clique, qu'il ait ete pose a la main ou non.
+
+        Le premier des deux clics a pu poser ou choisir un bandeau : le
+        double-clic retire celui qui se trouve sous le pointeur, quel qu'il
+        soit. Double-cliquer dans le vide revient donc a poser un bandeau puis
+        a le retirer aussitot, c'est-a-dire a ne rien faire.
+        """
+        self.double_clic_en_cours = True
+        if self.image is None:
+            return
+
+        x, y = self._vers_photo(evenement.x, evenement.y)
+        bandeau = self._bandeau_sous_le_point(x, y)
+        if bandeau is None:
+            bandeau = self._bandeau_du_visage_vise(x, y)
+        if bandeau is not None:
+            self._retirer(bandeau)
+
+    def _retirer(self, bandeau):
+        """Retire un bandeau de la photo courante (rien n'est ecrit sur le disque)."""
+        if bandeau in self.bandeaux_manuels:
+            self.bandeaux_manuels.remove(bandeau)
+        else:
+            for index, pose in list(self.bandeaux_visages.items()):
+                if pose is bandeau:
+                    del self.bandeaux_visages[index]
+                    break
+
+        if self.bandeau_selectionne is bandeau:
+            self.bandeau_selectionne = None
+        self.action = None
+        self.poignee_active = None
+        self._changer_survol(None)
+        self._demander_dessin()
+
+    # ------------------------------------------------------------------
+    # Survol : ce que la souris designe, sans avoir encore clique
+    # ------------------------------------------------------------------
+
+    def _souris_bougee(self, evenement):
+        """Met en avant la poignee ou le bandeau que la souris survole.
+
+        L'utilisateur voit ainsi ce qu'il va saisir avant d'appuyer, et la
+        forme du pointeur lui dit ce qui va se passer.
+        """
+        if self.action is not None or self.image is None:
+            return
+        self._changer_survol(
+            self._ce_qui_est_sous_le_point(*self._vers_photo(evenement.x, evenement.y)))
+
+    def _changer_survol(self, nouveau):
+        if nouveau == self.survol:
+            return
+        self.survol = nouveau
+        try:
+            self.canvas.config(cursor=POINTEURS.get(nouveau, ""))
+        except tk.TclError:
+            # Ce systeme ne connait pas ce pointeur : la fleche ordinaire fera.
+            self.canvas.config(cursor="")
         self._demander_dessin()
 
     # ------------------------------------------------------------------

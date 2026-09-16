@@ -9,9 +9,11 @@ crochets renvoient aux sections du cahier des charges
 
 ## 1. Nature du logiciel
 
-Outil **personnel de bureau**, lancé à la main depuis un environnement de
-développement (`python main.py`). Ce n'est ni un site web, ni une application
-mobile, ni une application à installer via une boutique. [3]
+Outil **personnel de bureau**, lancé par un double-clic sur `lancer.bat`
+(Windows), `lancer.command` (macOS) ou `lancer.sh` (Linux) — ou à la main par
+`python demarrer.py`, voire `python main.py` quand tout est déjà installé. Ce
+n'est ni un site web, ni une application mobile, ni une application à installer
+via une boutique. [3]
 
 Il rend deux services **successifs et bien distincts** [4] :
 
@@ -142,6 +144,33 @@ La question a été tranchée sur mesures et sur tarifs, pas par principe :
 Si le sujet est rouvert un jour, la seule piste à considérer serait un modèle
 local plus lourd (InsightFace / SCRFD), **pas** une API distante.
 
+## 4 ter. Windows, macOS et Linux
+
+Le logiciel doit fonctionner **à l'identique sur les trois systèmes**. Décision
+de l'utilisateur (16 septembre 2026). Les règles qui en découlent :
+
+- **Aucun chemin écrit à la main** : toujours `os.path.join`, jamais de `\` ni
+  de `/` en dur.
+- **Aucune police nommée en dur.** `Segoe UI` n'existe que sous Windows. On
+  passe par `polices.police(taille, gras)`, qui reprend la police normale du
+  système, quelle qu'elle soit.
+- **La molette de la souris** se signale par `<MouseWheel>` sous Windows et
+  macOS, mais par les boutons 4 et 5 sous X11 (donc sous Linux) : les trois
+  événements doivent être branchés.
+- **Les formes de pointeur** ne sont pas toutes connues partout : entourer
+  `canvas.config(cursor=...)` d'un `try` et retomber sur le pointeur ordinaire.
+- **Le lissage des tracés** ne doit pas dépendre de Tkinter, qui n'en fait pas :
+  ce qui doit être lisse est dessiné avec Pillow (voir `selection.py`), donc
+  rendu de la même façon partout.
+- **L'installation doit être automatique** : `demarrer.py` ne se sert que de ce
+  que Python fournit d'origine, de façon à pouvoir s'exécuter avant toute
+  installation. Il crée l'environnement, installe les bibliothèques, et
+  réessaie sans versions figées si celles-ci n'existent pas pour la plateforme.
+- Les fichiers `lancer.*` ne font qu'une chose : trouver un Python assez
+  récent, proposer de l'installer s'il n'y en a pas, puis appeler `demarrer.py`.
+
+---
+
 ## 5. Exclusions de périmètre [3]
 
 Les éléments suivants **ne font pas partie du logiciel** et ne doivent pas être
@@ -210,8 +239,27 @@ implémentés :
   l'écran. [9.5]
 - **Le bandeau épouse l'inclinaison de la tête** : il s'aligne sur la ligne
   joignant les deux yeux, il n'est pas systématiquement horizontal. [9.3]
-- **Comportement de bascule** : un second clic sur la même personne retire le
-  bandeau. Chaque personne est indépendante des autres. [9.3]
+- **L'épaisseur du bandeau vaut 0,40 fois l'écart des deux yeux**, et cette
+  valeur est justifiée par mesure, non choisie à vue : c'est la plus petite qui
+  couvre entièrement les yeux de toutes les morphologies examinées, avec une
+  marge d'erreur de repérage de 8 %. Elle valait 0,8, ce qui couvrait
+  systématiquement les sourcils et une partie du front. **Toute modification de
+  ce facteur doit être accompagnée du résultat de `tester_bandeau.py`**, qui
+  échoue si la nouvelle valeur laisse un œil visible ou si une valeur plus
+  faible suffirait.
+- **Un simple clic ne retire jamais un bandeau.** Il en pose un s'il n'y en a
+  pas, sinon il choisit celui qui se trouve sous le pointeur. Seul le
+  **double-clic** retire un bandeau. Règle posée par décision de l'utilisateur
+  (16 septembre 2026) : le comportement de bascule précédent faisait
+  disparaître un bandeau dès qu'on effleurait une de ses poignées, celles-ci
+  étant posées sur son bord. Chaque personne reste indépendante des autres.
+  [9.3]
+- **Tous les bandeaux se retouchent de la même façon**, qu'ils viennent de la
+  détection ou d'un clic dans le vide : mêmes poignées, même déplacement, même
+  retrait. Le logiciel ne doit jamais traiter les uns autrement que les autres.
+- **Un bandeau ne peut pas sortir de la photo** : son centre est ramené dans le
+  cadre à chaque déplacement, faute de quoi il disparaîtrait de l'écran sans
+  avoir été retiré.
 - **Copie de sauvegarde avant modification** : à la censure et au rognage, une
   copie intacte est conservée dans un dossier temporaire avant d'écrire, pour
   permettre l'annulation ; ce dossier est vidé à la fermeture. Chaque copie
@@ -271,3 +319,6 @@ Mise en œuvre :
 3. Un code en fichiers courts et lisibles, commentés aux endroits utiles.
 4. Un document d'accompagnement : installation, lancement, et récapitulatif de
    **toutes les commandes clavier de chaque étape**.
+5. Des lanceurs pour les trois systèmes, et une installation qui se fait seule.
+6. Des tests exécutables : `verifier_installation.py` pour l'installation,
+   `tester_bandeau.py` pour la géométrie du bandeau.

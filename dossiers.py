@@ -18,6 +18,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 
 from images import est_une_image
+from polices import police
 
 # Caracteres interdits dans un nom de dossier sous Windows.
 CARACTERES_INTERDITS = set('\\/:*?"<>|')
@@ -114,7 +115,7 @@ def dupliquer_dossier(parent, dossier_evenement, nom_source, nom_destination):
     cadre = ttk.Frame(attente, padding=24)
     cadre.grid(row=0, column=0)
     ttk.Label(cadre, text="Copie de « %s » vers « %s »" % (nom_source, nom_destination),
-              font=("Segoe UI", 10, "bold")).grid(row=0, column=0)
+              font=police(10, gras=True)).grid(row=0, column=0)
     etiquette = ttk.Label(cadre, text="Preparation...")
     etiquette.grid(row=1, column=0, pady=(8, 0))
     attente.update()
