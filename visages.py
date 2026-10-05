@@ -173,6 +173,8 @@ class DetectionAnticipee:
         self.cache = {}
         self.position = 0
         self.actif = True
+        # Nombre de fois ou chaque photo a ete oubliee (voir oublier).
+        self.oublis = {}
 
         self.signal = threading.Condition()
         self.fil = threading.Thread(target=self._travailler, daemon=True)
@@ -201,9 +203,16 @@ class DetectionAnticipee:
             self.signal.notify_all()
 
     def oublier(self, index):
-        """Force le recalcul d'une photo (utile apres une annulation)."""
+        """Force le recalcul d'une photo, apres un rognage, une retouche ou une annulation.
+
+        Le fil d'arriere-plan peut etre en train de calculer cette photo,
+        sur l'ancienne version de l'image : le compteur d'oublis lui permet de
+        s'en rendre compte, et de jeter ce resultat perime au lieu de le garder.
+        """
         with self.signal:
             self.cache.pop(index, None)
+            self.oublis[index] = self.oublis.get(index, 0) + 1
+            self.signal.notify_all()
 
     def arreter(self):
         """Arrete le fil de detection et attend qu'il ait termine.
@@ -232,6 +241,7 @@ class DetectionAnticipee:
                 if not self.actif:
                     return
                 index = self._prochain_a_calculer()
+                oublis_avant = self.oublis.get(index, 0)
 
             image = self.chargeur.image(index)
             resultat = self.detecteur.detecter(image)
@@ -239,6 +249,8 @@ class DetectionAnticipee:
             with self.signal:
                 if not self.actif:
                     return
+                if self.oublis.get(index, 0) != oublis_avant:
+                    continue    # la photo a change pendant le calcul : on recommence
                 self.cache[index] = resultat
                 # On ne garde en memoire que les photos proches de la position.
                 if len(self.cache) > 12:

@@ -2,10 +2,16 @@
 Affichage d'une photo en grand : zoom, deplacement de la vue, rotation et cadre
 de rognage (sections 8.1 et 8 bis).
 
-Sert a l'etape de tri et au mode revue. Tout ce qui se passe ici est purement
-visuel : le zoom, le deplacement de la vue et la rotation ne modifient jamais le
-fichier. Le cadre de rognage n'est lui aussi qu'un dessin a l'ecran : c'est
-rognage.py qui l'applique au fichier, et seulement quand l'utilisateur valide.
+Sert a l'etape de tri et au mode revue. Rien de ce qui se passe ici n'ecrit sur
+le disque : le zoom et le deplacement de la vue sont purement visuels, et la
+rotation et le cadre de rognage ne sont que des propositions a l'ecran. C'est
+la fenetre (rangement.py) qui les fait enregistrer, et seulement quand
+l'utilisateur valide.
+
+En mode « barrer », les clics sur la photo sont confies a un outil (voir
+censure.py), qui pose et retouche les bandeaux. La visionneuse lui transmet les
+clics en coordonnees de la photo d'origine, et lui laisse peindre ses bandeaux
+sur l'image affichee.
 
 Fluidite (section 11.1). Redimensionner une photo de 24 millions de pixels
 prend pres d'un cinquieme de seconde : bien trop pour le refaire a chaque
@@ -34,6 +40,10 @@ LUMINOSITE_HORS_CADRE = 0.35
 # Un cadre plus petit que ceci, en pixels de la photo, est considere comme un
 # simple clic et non comme un rognage voulu.
 TAILLE_MINIMALE_CADRE = 10
+
+# Deplacement, en pixels ecran, en dessous duquel un appui suivi d'un
+# relachement compte comme un simple clic, et non comme un glissement.
+SEUIL_DE_GLISSEMENT = 4
 
 COULEUR_FOND = "#1e1e1e"
 COULEUR_TEXTE = "#f0f0f0"
@@ -68,8 +78,17 @@ class Visionneuse:
         self.coin_ecran = (0, 0)      # position de la photo dans le canvas
         self.glissement = None
 
+        # Outil auquel sont confies les clics (mode barrer), ou None. Voir
+        # censure.OutilBandeaux pour les methodes qu'il doit offrir.
+        self.outil = None
+        self.clic_pour_l_outil = False    # l'appui en cours a-t-il ete pris par l'outil ?
+        self.point_presse = None
+        self.a_glisse = False
+
         # Ce qui est actuellement a l'ecran.
         self.rendu = None             # portion de photo affichee (image Pillow)
+        self.rendu_nu = None          # la meme, sans les bandeaux de l'outil
+        self.cle_rendu = None         # ce qui a servi a fabriquer rendu_nu
         self.photo_tk = None          # la meme, convertie pour Tkinter
         self.photo_sombre_tk = None   # la meme assombrie (rognage uniquement)
         self.photo_cadre_tk = None    # partie claire, a l'interieur du cadre
@@ -93,6 +112,9 @@ class Visionneuse:
         self.canvas.bind("<Button-1>", self._souris_pressee)
         self.canvas.bind("<B1-Motion>", self._souris_glissee)
         self.canvas.bind("<ButtonRelease-1>", self._souris_relachee)
+        self.canvas.bind("<Double-Button-1>", self._double_clic)
+        self.canvas.bind("<Motion>", self._souris_bougee)
+        self.canvas.bind("<Leave>", self._souris_sortie)
         self.canvas.bind("<Configure>", lambda evenement: self.demander_dessin())
 
     # ------------------------------------------------------------------
@@ -124,6 +146,7 @@ class Visionneuse:
         self.apercu = None
         self.apercu_pivote = None
         self.versions_zoom = {}
+        self.cle_rendu = None
         self.message = texte
         self.couleur_message = COULEUR_TEXTE
         self._remettre_a_zero()
@@ -168,6 +191,55 @@ class Visionneuse:
         if self.dessin_programme is not None:
             self.canvas.after_cancel(self.dessin_programme)
             self.dessin_programme = None
+
+    def facteur_affichage(self):
+        """Nombre de pixels d'ecran pour un pixel de la photo, zoom compris."""
+        if self.image is None:
+            return 1.0
+        return self._facteur()
+
+    def point_d_origine(self, x_ecran, y_ecran):
+        """Point de la photo d'origine (non pivotee) situe sous un point du canvas."""
+        return self._affiche_vers_origine(*self._vers_photo(x_ecran, y_ecran))
+
+    # ------------------------------------------------------------------
+    # Rotation d'examen : passer d'un repere a l'autre
+    # ------------------------------------------------------------------
+
+    def _origine_vers_affiche(self, x, y):
+        """Point de la photo d'origine -> meme point sur la photo pivotee a l'ecran.
+
+        Les bandeaux sont toujours memorises dans le repere de la photo
+        d'origine : ils restent ainsi a leur place quand on pivote la photo, et
+        s'incrustent directement dans le fichier, avant que celui-ci soit
+        lui-meme pivote. Pour les afficher, il faut donc faire tourner leurs
+        points comme la photo.
+
+        Quart de tour (90 degres) : le haut de la photo d'origine passe a
+        droite de l'ecran. Un point situe a la distance y du haut se retrouve a
+        la meme distance du bord droit, soit en x = hauteur - y ; et sa distance
+        au bord gauche devient sa distance au haut de l'ecran. Les deux autres
+        cas se raisonnent de la meme facon (voir aussi rognage.py).
+        """
+        largeur, hauteur = self.image.size
+        if self.rotation == 90:
+            return (hauteur - y, x)
+        if self.rotation == 180:
+            return (largeur - x, hauteur - y)
+        if self.rotation == 270:
+            return (y, largeur - x)
+        return (x, y)
+
+    def _affiche_vers_origine(self, x, y):
+        """Operation inverse de _origine_vers_affiche."""
+        largeur, hauteur = self.image.size
+        if self.rotation == 90:
+            return (y, hauteur - x)
+        if self.rotation == 180:
+            return (largeur - x, hauteur - y)
+        if self.rotation == 270:
+            return (largeur - y, x)
+        return (x, y)
 
     # ------------------------------------------------------------------
     # Dessin differe
@@ -225,6 +297,7 @@ class Visionneuse:
         pixels a chaque appui sur R.
         """
         self.versions_zoom = {}
+        self.cle_rendu = None
         if self.apercu is None or not self.rotation:
             self.apercu_pivote = self.apercu
         else:
@@ -330,17 +403,36 @@ class Visionneuse:
         cible = (max(1, round(largeur_visible * facteur)),
                  max(1, round(hauteur_visible * facteur)))
 
-        if self.zoom == 1.0 and version.size == cible:
-            # Cas le plus frequent : vue d'ensemble, et l'apercu a ete prepare
-            # exactement a la taille de la zone d'affichage. Il est montre tel
-            # quel, sans aucun calcul.
-            self.rendu = version
-        else:
-            # Apercu : LANCZOS donne le rendu le plus net et reste rapide sur
-            # une petite image. Zoom : BILINEAR, deux fois plus rapide, garde
-            # le deplacement de la vue fluide.
-            filtre = Image.LANCZOS if version is self.apercu_pivote else Image.BILINEAR
-            self.rendu = version.resize(cible, filtre, box=zone)
+        # Quand seuls les bandeaux changent (on en tire un a la souris), la
+        # portion de photo a montrer est la meme que la fois precedente : on la
+        # reprend telle quelle au lieu de la recalculer a chaque mouvement.
+        cle = (id(version), zone, cible)
+        if cle != self.cle_rendu:
+            if self.zoom == 1.0 and version.size == cible:
+                # Cas le plus frequent : vue d'ensemble, et l'apercu a ete
+                # prepare exactement a la taille de la zone d'affichage. Il est
+                # montre tel quel, sans aucun calcul.
+                self.rendu_nu = version
+            else:
+                # Apercu : LANCZOS donne le rendu le plus net et reste rapide
+                # sur une petite image. Zoom : BILINEAR, deux fois plus rapide,
+                # garde le deplacement de la vue fluide.
+                filtre = Image.LANCZOS if version is self.apercu_pivote else Image.BILINEAR
+                self.rendu_nu = version.resize(cible, filtre, box=zone)
+            self.cle_rendu = cle
+
+        self.rendu = self.rendu_nu
+        if self.outil is not None:
+            # Les bandeaux sont peints dans une copie : la portion de photo
+            # sans bandeaux reste disponible pour le dessin suivant.
+            self.rendu = self.rendu_nu.copy()
+
+            def vers_rendu(x, y):
+                """Point de la photo d'origine -> pixel de la portion affichee."""
+                x_affiche, y_affiche = self._origine_vers_affiche(x, y)
+                return ((x_affiche - self.vue_x) * facteur, (y_affiche - self.vue_y) * facteur)
+
+            self.outil.peindre(self.rendu, vers_rendu)
 
         self.photo_tk = ImageTk.PhotoImage(self.rendu)
         self.photo_sombre_tk = None
@@ -402,24 +494,65 @@ class Visionneuse:
     def _souris_pressee(self, evenement):
         if self.image is None:
             return
+        self.point_presse = (evenement.x, evenement.y)
+        self.a_glisse = False
         if self.en_rognage:
             # Presser le bouton commence un nouveau cadre : pour corriger un
             # cadre mal trace, il suffit donc d'en tracer un autre.
             self.depart_cadre = self._point_dans_la_photo(evenement.x, evenement.y)
             self.cadre = None
             self._demander_dessin_du_cadre()
-        else:
+            return
+
+        # En mode barrer, l'outil prend l'appui s'il tombe sur un bandeau ou
+        # sur une poignee. Sinon, cliquer-glisser deplace la vue, comme
+        # d'habitude ; et un simple clic, sans glisser, posera un bandeau au
+        # relachement (voir _souris_relachee).
+        self.clic_pour_l_outil = (self.outil is not None and self.outil.pressee(
+            *self.point_d_origine(evenement.x, evenement.y)))
+        if not self.clic_pour_l_outil:
             self.glissement = (evenement.x, evenement.y)
 
     def _souris_glissee(self, evenement):
+        if self.point_presse is not None:
+            depart_x, depart_y = self.point_presse
+            if (abs(evenement.x - depart_x) > SEUIL_DE_GLISSEMENT
+                    or abs(evenement.y - depart_y) > SEUIL_DE_GLISSEMENT):
+                self.a_glisse = True
+
         if self.en_rognage:
             self._tracer_cadre(evenement)
+        elif self.clic_pour_l_outil:
+            self.outil.glissee(*self.point_d_origine(evenement.x, evenement.y))
         else:
             self._deplacer_vue(evenement)
 
     def _souris_relachee(self, evenement):
+        if (self.outil is not None and not self.en_rognage and self.image is not None
+                and self.point_presse is not None):
+            self.outil.relachee(*self.point_d_origine(evenement.x, evenement.y),
+                                a_glisse=self.a_glisse)
         self.glissement = None
         self.depart_cadre = None
+        self.point_presse = None
+        self.clic_pour_l_outil = False
+        self.a_glisse = False
+
+    def _double_clic(self, evenement):
+        if self.outil is not None and not self.en_rognage and self.image is not None:
+            self.outil.double_clic(*self.point_d_origine(evenement.x, evenement.y))
+
+    def _souris_bougee(self, evenement):
+        """Signale a l'outil ce que survole la souris, bouton relache."""
+        if self.outil is not None and self.point_presse is None:
+            if self.image is None or self.en_rognage:
+                self.outil.survoler(None)
+            else:
+                self.outil.survoler(self.point_d_origine(evenement.x, evenement.y))
+
+    def _souris_sortie(self, evenement):
+        if self.outil is not None:
+            self.outil.survoler(None)
 
     def _tracer_cadre(self, evenement):
         """Le cadre va du point ou le bouton a ete presse jusqu'a la souris.

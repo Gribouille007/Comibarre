@@ -1,9 +1,11 @@
 """
-Mode revue - reclasser les photos d'un dossier deja trie (section 8 bis).
+Mode revue - reclasser ou censurer les photos d'un dossier (section 8 bis).
 
 On repasse une a une les photos de l'un des quatre dossiers de tri. Si une
 photo n'est pas a sa place, la touche d'un autre dossier l'y deplace aussitot ;
-la touche du dossier revu la laisse ou elle est.
+la touche du dossier revu la laisse ou elle est. Les copies faites depuis le
+menu peuvent aussi etre revues, pour y barrer des yeux : leurs photos n'en
+sortent pas, les touches de tri y sont sans effet.
 
 La fenetre est la meme qu'a l'etape de tri (voir rangement.py) : seules
 changent les photos presentees.
@@ -16,7 +18,7 @@ from rangement import FenetreRangement
 def preparer_revue(suivi, nom_dossier):
     """Met a jour, dans le fichier de suivi, la liste des photos a revoir.
 
-    Meme principe que pour la censure (section 9.7) : rouvrir le meme dossier
+    Rouvrir le meme dossier
     retombe sur la photo ou l'on s'etait arrete. On repart en revanche du debut
     si l'on change de dossier, ou si le dossier avait deja ete revu en entier.
     """
@@ -42,7 +44,7 @@ def preparer_revue(suivi, nom_dossier):
 
 
 def lancer_revue(racine, suivi, nom_dossier):
-    """Ouvre le mode revue sur un dossier de tri. Renvoie le nombre de photos."""
+    """Ouvre le mode revue sur un dossier de tri ou une copie. Renvoie le nombre de photos."""
     preparer_revue(suivi, nom_dossier)
     if not suivi.revue["photos"]:
         return 0

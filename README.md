@@ -182,9 +182,14 @@ VotreDossierPhotos/
 
 ### Étape C — Menu principal
 
-Cinq choix : lancer le tri, lancer la censure, lancer le **mode revue**,
-**dupliquer un dossier**, ou quitter. Le menu rappelle votre avancement et le nombre de photos dans chaque
-dossier, copies comprises.
+Quatre choix : **trier** les photos du dossier source, **revoir un dossier**
+(reclasser, barrer des yeux), **dupliquer un dossier**, ou quitter. Le menu
+rappelle votre avancement et le nombre de photos dans chaque dossier, copies
+comprises.
+
+Le tri, la revue et la censure des yeux se font **dans la même fenêtre** : la
+censure n'est plus une étape à part, c'est le **mode barrer**, que la touche
+**Tab** active ou désactive (section 6).
 
 ---
 
@@ -198,19 +203,33 @@ en permanence, sous la forme « Photo 12 sur 340 ».
 
 | Touche ou action | Effet |
 |---|---|
-| **Vos 4 touches de tri** | Déplacer la photo vers le dossier correspondant, puis afficher la suivante |
-| **Barre d'espace** ou **flèche droite** | Passer à la photo suivante **sans** la ranger (elle reste dans le dossier source) |
-| **Flèche gauche** | Revenir à la photo précédente, sans rien déplacer |
-| **Retour arrière** | Annuler la dernière action (rangement ou rognage) : la photo revient à sa place et se réaffiche. Plusieurs annulations de suite sont possibles |
-| **R** | Faire pivoter l'affichage d'un quart de tour |
+| **Vos 4 touches de tri** | Enregistrer les retouches en attente (rotation, bandeaux), déplacer la photo vers le dossier correspondant, puis afficher la suivante |
+| **Entrée** | Enregistrer les retouches en attente dans la photo, sans la déplacer, puis afficher la suivante |
+| **Barre d'espace** ou **flèche droite** | Passer à la photo suivante **sans** la ranger ni enregistrer ses retouches |
+| **Flèche gauche** | Revenir à la photo précédente, sans rien déplacer ni enregistrer |
+| **Retour arrière** | Annuler la dernière action (rangement, retouche ou rognage) : la photo revient à sa place, dans son état d'avant, et se réaffiche. Plusieurs annulations de suite sont possibles |
+| **R** | Faire pivoter la photo d'un quart de tour (enregistré par Entrée ou une touche de tri) |
 | **C** | Rogner la photo (voir ci-dessous) |
+| **Tab** | Activer ou désactiver le **mode barrer** les yeux (section 6) |
 | **Molette de la souris** | Agrandir ou réduire la vue (zoom) |
 | **Cliquer-glisser** | Déplacer la vue lorsque la photo est agrandie |
 | **Échap** | Enregistrer l'avancement et fermer |
 
-> Le zoom et la rotation **ne modifient jamais le fichier**. Ils servent
-> uniquement à mieux examiner la photo avant de la ranger ; elle est déplacée
-> telle quelle.
+### Retouches : ce qui est enregistré, et quand
+
+La rotation (R) et les bandeaux (mode barrer) sont d'abord **provisoires** :
+la barre du bas les signale en orange, « À enregistrer : rotation 90°,
+2 bandeau(x) ». Ils sont écrits dans la photo :
+
+- par **Entrée**, qui enregistre et passe à la suivante ;
+- par **une touche de tri**, qui enregistre puis range la photo.
+
+**Espace**, les **flèches** et **Échap** les abandonnent : la photo reste
+intacte. Le zoom, lui, n'est jamais enregistré.
+
+La photo est réenregistrée dans son format d'origine, en gardant sa date de
+prise de vue et ses autres informations (EXIF), ainsi que son profil de
+couleurs. Une photo sans retouche n'est jamais réécrite.
 
 **Revenir sur une photo déjà rangée.** Les flèches font circuler librement d'une
 photo à l'autre sans rien déplacer. Une photo déjà rangée s'affiche depuis le
@@ -225,12 +244,15 @@ déplace alors de ce dossier vers le nouveau.
 3. **Entrée** rogne la photo et l'enregistre à sa place, dans son format
    d'origine. **Échap** ou **C** abandonne sans rien modifier.
 
-- Si vous avez pivoté l'affichage avec R, tracez le cadre sur la photo telle
-  que vous la voyez : le rognage tombe au bon endroit, et la photo est ensuite
-  enregistrée dans son sens d'origine (la rotation reste purement visuelle).
-- Une copie intacte est gardée avant chaque rognage : **Retour arrière** la
-  remet en place. Ces copies sont effacées à la fermeture de la fenêtre ;
-  l'annulation d'un rognage n'est donc possible que tant qu'elle est ouverte.
+- Si vous avez pivoté la photo avec R, tracez le cadre sur la photo telle que
+  vous la voyez : le rognage tombe au bon endroit. La rotation reste ensuite
+  en attente, comme avant le rognage, et les bandeaux déjà posés suivent le
+  nouveau cadrage.
+- Une copie intacte est gardée avant chaque rognage et chaque retouche :
+  **Retour arrière** la remet en place. Ces copies sont effacées à la fermeture
+  de la fenêtre ; l'annulation d'une modification de la photo n'est donc
+  possible que tant qu'elle est ouverte. Un rangement, lui, reste annulable à
+  la session suivante.
 
 L'étape est terminée lorsque toutes les photos ont été soit rangées, soit
 passées. Les photos passées restent dans le dossier source et pourront être
@@ -238,11 +260,12 @@ traitées plus tard.
 
 ---
 
-## 5. Mode revue — reclasser un dossier trié
+## 5. Revoir un dossier — reclasser ou censurer
 
-Pour corriger un rangement après coup. Depuis le menu, choisissez **« Mode
-revue »**, puis l'un des quatre dossiers de tri : ses photos défilent une par
-une, comme au tri.
+Pour corriger un rangement après coup, ou pour barrer des yeux. Depuis le menu,
+choisissez **« Revoir un dossier »**, puis l'un des quatre dossiers de tri ou
+l'une des copies (section 7) : ses photos défilent une par une, dans la même
+fenêtre qu'au tri.
 
 Par exemple, en revoyant « À garder », vous tombez sur une photo ratée : appuyez
 sur la touche de « Ratées », elle y est **déplacée immédiatement** et la photo
@@ -250,18 +273,20 @@ suivante s'affiche.
 
 | Touche ou action | Effet |
 |---|---|
-| **Touche d'un autre dossier** | Déplacer la photo vers ce dossier, puis afficher la suivante |
-| **Touche du dossier revu** | Laisser la photo où elle est et passer à la suivante |
-| **Barre d'espace** ou **flèche droite** | Passer à la photo suivante sans la déplacer |
+| **Touche d'un autre dossier** | Enregistrer les retouches, déplacer la photo vers ce dossier, puis afficher la suivante |
+| **Touche du dossier revu** | Enregistrer les retouches, laisser la photo où elle est et passer à la suivante |
+| **Entrée** | Enregistrer les retouches et passer à la suivante |
+| **Barre d'espace** ou **flèche droite** | Passer à la photo suivante sans la déplacer ni l'enregistrer |
 | **Flèche gauche** | Revenir à la photo précédente, sans rien déplacer |
-| **Retour arrière** | Annuler le dernier déplacement ou rognage |
-| **R**, **C**, molette, cliquer-glisser | Comme au tri : pivoter, rogner, zoomer, déplacer la vue |
+| **Retour arrière** | Annuler le dernier déplacement, la dernière retouche ou le dernier rognage |
+| **R**, **C**, **Tab**, molette, cliquer-glisser | Comme au tri : pivoter, rogner, mode barrer, zoomer, déplacer la vue |
 | **Échap** | Enregistrer l'avancement et fermer |
 
 Ce qu'il faut savoir :
 
-- Seuls les quatre dossiers de tri peuvent être revus, et ce sont les seules
-  destinations possibles. Les copies (section 8) n'ont pas de touche.
+- Les quatre dossiers de tri sont les seules destinations possibles. Dans une
+  **copie** (section 7), les touches de tri sont sans effet : ses photos n'en
+  sortent pas, on n'y fait que retoucher et barrer des yeux.
 - Si le dossier de destination contient déjà un fichier du même nom, **rien
   n'est déplacé** et un message vous prévient : aucune photo n'est jamais
   écrasée.
@@ -273,14 +298,20 @@ Ce qu'il faut savoir :
 
 ---
 
-## 6. Étape 2 — La censure des yeux
+## 6. Le mode barrer — la censure des yeux
 
-Lancée depuis le menu, à tout moment après le tri. Vous choisissez **un seul**
-dossier à passer en revue : l'un des quatre dossiers de tri, ou l'une des copies
-faites depuis le menu (section 7).
+Il n'y a plus d'étape de censure à part. Dans la fenêtre du tri ou de la revue,
+appuyez sur **Tab** : le mode barrer s'active, une pastille rouge « MODE
+BARRER » le signale en bas à droite. Il **reste actif** d'une photo à l'autre,
+et même d'une session à l'autre, jusqu'à ce que vous rappuyiez sur Tab.
+
+Vous pouvez donc trier et censurer en un seul passage : poser les bandeaux, puis
+appuyer sur la touche de tri, qui enregistre les bandeaux et range la photo. Ou
+bien, pour censurer sans ranger, revoir un dossier (ou une copie) et valider
+chaque photo par Entrée.
 
 Pour chaque photo, le logiciel **détecte automatiquement les visages** et la
-position des deux yeux.
+position des deux yeux ; leur nombre s'affiche à côté de la pastille.
 
 ### Poser un bandeau
 
@@ -319,6 +350,7 @@ cinq poignées apparaissent.
 | Glisser une poignée **du haut ou du bas** | Modifier son épaisseur |
 | Glisser la poignée **bleue, au bout du fil** | Le faire pivoter |
 | **Double-cliquer** sur un bandeau | Le retirer |
+| **Cliquer-glisser** à côté des bandeaux | Déplacer la vue (photo agrandie) |
 
 Les poignées vont par paires, une de chaque côté : prenez celle qui tombe sous
 votre souris. La forme du pointeur indique ce que vous vous apprêtez à saisir,
@@ -328,16 +360,20 @@ et la poignée survolée se met en avant.
 > l'efface jamais : c'est ce qui permet d'attraper une poignée, ou de déplacer
 > un bandeau, sans risquer de le faire disparaître par mégarde.
 
+Le zoom et la rotation restent disponibles : les bandeaux suivent la photo
+quand vous la pivotez, et s'enregistrent exactement là où vous les voyez.
+
 ### Ce qui est enregistré, et quand
 
-- **Tant que vous n'appuyez pas sur Entrée, rien n'est écrit sur le disque.**
-  Les bandeaux ne sont que des dessins provisoires à l'écran.
+- **Tant que vous n'appuyez pas sur Entrée ou sur une touche de tri, rien
+  n'est écrit sur le disque.** Les bandeaux ne sont que des dessins provisoires
+  à l'écran ; passer à une autre photo (Espace, flèches) les abandonne.
 - À la validation, la photo est **réenregistrée dans son format d'origine** (un
   JPEG reste JPEG, un PNG reste PNG, un HEIC reste HEIC) **par-dessus le fichier
-  existant**, dans le même dossier. Elle n'est pas déplacée.
-- Si vous validez une photo **sans aucun bandeau**, le fichier n'est pas réécrit
-  du tout : cela éviterait une recompression inutile qui dégraderait la photo
-  sans rien y apporter.
+  existant**. Avec Entrée elle reste dans son dossier ; avec une touche de tri,
+  elle est rangée en même temps.
+- Désactiver le mode barrer (Tab) abandonne les bandeaux non enregistrés de la
+  photo affichée.
 
 ### Filet de sécurité
 
@@ -373,13 +409,13 @@ Ce qu'il faut savoir :
 - Une copie **n'est pas un cinquième dossier de tri** : le tri en compte
   toujours quatre, chacun avec sa touche. La copie ne reçoit donc pas de touche.
 - Une copie **peut être censurée** comme n'importe quel dossier : elle apparaît
-  dans la liste proposée à l'étape 2.
+  dans la liste proposée par « Revoir un dossier ».
 - La copie ne concerne que les fichiers posés directement dans le dossier.
 - Les dossiers `RAW/` et `Videos/` ne sont pas proposés : leur contenu ne doit
   jamais être modifié, une copie n'aurait donc pas d'objet.
 
 Utilisation typique : dupliquer « À garder » en « À garder - censuré », puis
-censurer la copie. Les originaux restent intacts.
+revoir la copie en mode barrer. Les originaux restent intacts.
 
 ---
 
@@ -413,12 +449,13 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 | `main.py` | Lancement, gestion des sessions, menu principal |
 | `configuration.py` | Écran de configuration d'un nouvel événement |
 | `preparation.py` | Création des dossiers, renommage, mise à l'écart RAW/vidéo |
-| `tri.py` | Étape 1 : lance la fenêtre de rangement sur le dossier source |
-| `revue.py` | Mode revue : lance la fenêtre de rangement sur un dossier de tri |
-| `rangement.py` | Fenêtre commune au tri et à la revue : clavier, déplacements, navigation, annulation |
-| `visionneuse.py` | Affichage d'une photo : zoom, vue, rotation, cadre de rognage |
+| `tri.py` | Tri : lance la fenêtre de rangement sur le dossier source |
+| `revue.py` | Revue : lance la fenêtre de rangement sur un dossier de tri ou une copie |
+| `rangement.py` | La fenêtre unique : clavier, déplacements, retouches, mode barrer, navigation, annulation |
+| `visionneuse.py` | Affichage d'une photo : zoom, vue, rotation, cadre de rognage, relais des clics |
 | `rognage.py` | Écriture d'une photo rognée sur le disque |
-| `censure.py` | Étape 2 : affichage, clics, validation, annulation |
+| `retouches.py` | Écriture des bandeaux et de la rotation dans la photo |
+| `censure.py` | Mode barrer : pose et retouche des bandeaux à la souris |
 | `bandeaux.py` | Géométrie du bandeau : inclinaison, poignées, dessin aux bords lisses |
 | `selection.py` | Habillage du bandeau choisi : contour et poignées, tracés lissés |
 | `visages.py` | Détection des visages et des yeux |
@@ -446,6 +483,11 @@ arrière-plan, et leurs visages déjà détectés. Le logiciel est prévu pour e
 **Une personne au fond n'est pas détectée.**
 Cliquez simplement à l'endroit de ses yeux : un bandeau manuel apparaît, que vous
 pouvez déplacer, redimensionner et incliner.
+
+**J'ai pivoté une photo, mais le fichier n'a pas changé.**
+La rotation n'est enregistrée que par **Entrée** ou par une **touche de tri**.
+Espace et les flèches l'abandonnent, pour qu'une rotation faite seulement pour
+mieux voir ne modifie pas la photo.
 
 **J'ai validé une photo par erreur.**
 Appuyez sur Retour arrière : la photo d'origine est restaurée. Attention, cela

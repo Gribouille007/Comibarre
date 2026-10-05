@@ -26,6 +26,11 @@ EXTENSIONS_IMAGE = {
 }
 
 
+# Formats dans lesquels Pillow sait reecrire les donnees EXIF et le profil de
+# couleurs de la photo.
+FORMATS_AVEC_EXIF = {"JPEG", "PNG", "HEIF", "HEIC", "WEBP"}
+
+
 def est_une_image(nom_fichier):
     return os.path.splitext(nom_fichier)[1].lower() in EXTENSIONS_IMAGE
 
@@ -92,6 +97,19 @@ def enregistrer_au_format_origine(image, chemin, format_image):
         options = {"quality": 95, "subsampling": 0}
     elif format_image in ("HEIF", "HEIC"):
         options = {"quality": 95}
+
+    # Pillow n'ecrit les informations de la photo que si on les lui redonne.
+    # Sans cela, une photo rognee ou censuree perdrait sa date de prise de vue
+    # et son profil de couleurs (ses couleurs changeraient a l'ecran). Les
+    # donnees EXIF ont deja perdu leur etiquette d'orientation (voir
+    # charger_image) : la photo, enregistree droite, ne sera pas tournee une
+    # seconde fois par les visionneuses.
+    if format_image in FORMATS_AVEC_EXIF:
+        exif = image.getexif()
+        if exif:
+            options["exif"] = exif.tobytes()
+        if image.info.get("icc_profile"):
+            options["icc_profile"] = image.info["icc_profile"]
 
     chemin_temporaire = chemin + ".tmp"
     image.save(chemin_temporaire, format=format_image, **options)

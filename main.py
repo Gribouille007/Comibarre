@@ -6,8 +6,10 @@ Se lance simplement par :
     python main.py
 
 Le deroule est toujours le meme : on demarre un nouvel evenement ou l'on reprend
-un evenement existant, puis le menu principal propose le tri, la censure, le
-mode revue, la duplication d'un dossier, ou de quitter.
+un evenement existant, puis le menu principal propose le tri, la revue d'un
+dossier, la duplication d'un dossier, ou de quitter. La censure des yeux n'est
+plus une etape a part : c'est le mode « barrer » de la fenetre de tri et de
+revue, active par la touche Tab (voir rangement.py).
 """
 
 import os
@@ -18,7 +20,6 @@ from tkinter import messagebox, simpledialog, ttk
 
 import dossiers
 import preparation
-from censure import lancer_censure
 from configuration import demander_configuration
 from polices import police
 from revue import lancer_revue
@@ -154,15 +155,15 @@ class MenuPrincipal:
                                         justify="left")
         self.etiquette_etat.grid(row=1, column=0, sticky="w", pady=(4, 16))
 
-        ttk.Button(cadre, text="Etape 1  -  Trier les photos", width=38,
+        ttk.Button(cadre, text="Trier les photos du dossier source", width=42,
                    command=self._trier).grid(row=2, column=0, pady=4)
-        ttk.Button(cadre, text="Etape 2  -  Censurer les yeux", width=38,
-                   command=self._censurer).grid(row=3, column=0, pady=4)
-        ttk.Button(cadre, text="Mode revue  -  Reclasser un dossier trie", width=38,
-                   command=self._revoir).grid(row=4, column=0, pady=4)
-        ttk.Button(cadre, text="Dupliquer un dossier", width=38,
+        ttk.Button(cadre, text="Revoir un dossier  (reclasser, barrer les yeux)", width=42,
+                   command=self._revoir).grid(row=3, column=0, pady=4)
+        ttk.Label(cadre, text="Touche Tab dans la fenetre : mode barrer les yeux",
+                  foreground="#555555").grid(row=4, column=0, pady=(2, 0))
+        ttk.Button(cadre, text="Dupliquer un dossier", width=42,
                    command=self._dupliquer).grid(row=5, column=0, pady=(12, 4))
-        ttk.Button(cadre, text="Quitter", width=38,
+        ttk.Button(cadre, text="Quitter", width=42,
                    command=self.quitter).grid(row=6, column=0, pady=(16, 0))
 
         self._rafraichir()
@@ -214,35 +215,17 @@ class MenuPrincipal:
             self.fenetre.deiconify()
         self._rafraichir()
 
-    def _censurer(self):
-        nom_dossier = self._demander_un_dossier(
-            "Choisir le dossier a censurer",
-            "Quel dossier voulez-vous passer en revue ?",
-            self.suivi.noms_dossiers_censurables)
-        if nom_dossier is None:
-            return
-
-        self.fenetre.withdraw()
-        try:
-            nombre = lancer_censure(self.racine, self.suivi, nom_dossier)
-        finally:
-            self.fenetre.deiconify()
-        if nombre == 0:
-            messagebox.showinfo("Dossier vide",
-                                "Le dossier « %s » ne contient aucune photo." % nom_dossier,
-                                parent=self.fenetre)
-        self._rafraichir()
-
     def _revoir(self):
-        """Repasse un dossier de tri pour corriger des rangements (section 8 bis).
+        """Repasse un dossier pour corriger des rangements ou barrer des yeux (section 8 bis).
 
-        Seuls les quatre dossiers de tri sont proposes : ce sont aussi les seules
-        destinations possibles, chacune ayant sa touche. Les copies n'en ont pas.
+        Les quatre dossiers de tri sont proposes, ainsi que les copies faites
+        depuis le menu. Dans une copie, les touches de tri sont sans effet : on
+        n'y fait que retoucher et censurer.
         """
         nom_dossier = self._demander_un_dossier(
             "Choisir le dossier a revoir",
             "Quel dossier voulez-vous revoir ?",
-            self.suivi.noms_dossiers_tri)
+            self.suivi.noms_dossiers_censurables)
         if nom_dossier is None:
             return
 
@@ -260,7 +243,7 @@ class MenuPrincipal:
     def _demander_un_dossier(self, titre, question, noms):
         """Fait choisir un des dossiers de l'evenement (section 9.1).
 
-        La meme boite sert a choisir le dossier a censurer et le dossier a
+        La meme boite sert a choisir le dossier a revoir et le dossier a
         dupliquer. Renvoie le nom choisi, ou None si l'utilisateur annule.
         """
         boite = tk.Toplevel(self.fenetre)
@@ -307,7 +290,7 @@ class MenuPrincipal:
 
         Une copie n'est pas un cinquieme dossier de tri : le tri en compte
         toujours quatre, chacun avec sa touche. Elle peut en revanche etre
-        passee en revue a l'etape de censure, comme les autres.
+        revue, et censuree, comme les autres.
         """
         nom_source = self._demander_un_dossier(
             "Dupliquer un dossier",

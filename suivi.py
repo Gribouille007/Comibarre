@@ -18,7 +18,7 @@ NOM_FICHIER_SUIVI = "suivi.json"
 
 # Dossier ou sont conservees les copies intactes des photos avant censure ou
 # rognage, pour permettre l'annulation (section 9.6). Vide a la fermeture de
-# chaque etape.
+# la fenetre.
 NOM_DOSSIER_TEMPORAIRE = "_sauvegardes_temporaires"
 
 
@@ -58,12 +58,10 @@ class Suivi:
                 "historique": [],  # rangements effectues, pour l'annulation
                 "terminee": False,
             },
-            "censure": {
-                "dossier": None,   # nom du dossier de tri en cours de traitement
-                "position": 0,
-                "historique": [],  # validations effectuees, pour l'annulation
-            },
             "revue": Suivi._revue_vide(),
+            # Mode barrer (pose de bandeaux sur les yeux) : active ou non par
+            # la touche Tab, et retenu d'une photo et d'une session a l'autre.
+            "mode_barrer": False,
         }
         return cls(dossier_evenement, donnees)
 
@@ -166,10 +164,6 @@ class Suivi:
         return self.donnees["tri"]
 
     @property
-    def censure(self):
-        return self.donnees["censure"]
-
-    @property
     def revue(self):
         """Etat du mode revue.
 
@@ -177,6 +171,15 @@ class Suivi:
         une version precedente du logiciel, qui ne connaissait pas la revue.
         """
         return self.donnees.setdefault("revue", Suivi._revue_vide())
+
+    @property
+    def mode_barrer(self):
+        """Le mode barrer est-il actif ? (False pour un suivi d'une version precedente)"""
+        return self.donnees.get("mode_barrer", False)
+
+    @mode_barrer.setter
+    def mode_barrer(self, actif):
+        self.donnees["mode_barrer"] = actif
 
     def chemin_dossier(self, nom_dossier):
         """Chemin complet d'un dossier range dans le dossier de l'evenement.

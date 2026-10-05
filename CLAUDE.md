@@ -15,18 +15,24 @@ Outil **personnel de bureau**, lancé par un double-clic sur `lancer.bat`
 n'est ni un site web, ni une application mobile, ni une application à installer
 via une boutique. [3]
 
-Il rend deux services **successifs et bien distincts** [4] :
+Il rend deux services [4] :
 
 1. **Le tri** — les photos brutes défilent une par une en grand ; une touche du
    clavier range chaque photo dans l'un de **quatre** dossiers de tri.
-2. **La censure des yeux** — plus tard, sur **un seul** dossier de tri choisi
-   par l'utilisateur : un clic pose un bandeau noir sur les yeux d'une personne,
-   la validation incruste les bandeaux et réenregistre la photo sur place.
+2. **La censure des yeux** — un clic pose un bandeau noir sur les yeux d'une
+   personne, la validation incruste les bandeaux et réenregistre la photo.
 
 S'y ajoute un **mode revue** (ajouté par décision de l'utilisateur, 13 septembre
 2026) : on repasse les photos de l'un des quatre dossiers de tri, et la touche
-d'un autre dossier y déplace aussitôt une photo mal rangée. Il partage la
-fenêtre du tri (`rangement.py`), seul le dossier d'origine change.
+d'un autre dossier y déplace aussitôt une photo mal rangée.
+
+**Une seule fenêtre pour tout** (décision de l'utilisateur, 5 octobre 2026) : le
+cahier des charges séparait le tri et la censure en deux étapes successives ;
+ils sont désormais réunis dans `rangement.py`. La censure est le **mode
+barrer**, activé et désactivé par la touche **Tab**, et **retenu** d'une photo
+et d'une session à l'autre (`mode_barrer` dans le suivi). Tri et revue ne
+diffèrent que par le dossier d'origine ; une copie faite depuis le menu se
+revoit aussi, mais sans touches de tri (ses photos n'en sortent pas).
 
 Volume visé : jusqu'à environ **3 000 photos** par session, sans perte de
 fluidité. [1]
@@ -198,18 +204,24 @@ implémentés :
   dossier source. [8.2]
 - **La barre d'espace ne range rien** : la photo passée reste dans le dossier
   source. [8.2]
-- **Zoom et rotation à l'étape de tri sont purement visuels** : ils ne modifient
-  jamais le fichier, qui est déplacé tel quel. [8.1]
+- **Le zoom est purement visuel**. **La rotation peut être enregistrée**
+  (décision de l'utilisateur, 5 octobre 2026, à la place de la règle [8.1]) :
+  comme les bandeaux, elle reste provisoire jusqu'à **Entrée** (enregistrer
+  puis suivante) ou une **touche de tri** (enregistrer puis ranger). Espace,
+  flèches et Échap l'abandonnent. Les bandeaux sont mémorisés dans le repère de
+  la photo non pivotée : ils sont incrustés d'abord, la photo est pivotée
+  ensuite (`retouches.py`), par quart de tour exact, sans recalcul de pixels.
 - **Les flèches gauche et droite ne font que naviguer**, dans toutes les étapes :
   elles ne déplacent, ne modifient ni n'enregistrent aucune photo (seule la
   position est notée dans le suivi). Au tri et en revue, une photo déjà rangée
   est montrée depuis le dossier où elle se trouve ; une touche de tri la déplace
   de là vers le nouveau dossier.
 - **Rognage** : rien n'est écrit avant la validation (Entrée). Le cadre est
-  tracé sur la photo remise dans le bon sens (EXIF) puis éventuellement pivotée
-  pour l'examen ; la rotation d'examen est annulée avant l'enregistrement, elle
-  reste purement visuelle. Mêmes garanties qu'à la censure : copie de sauvegarde,
-  réenregistrement dans le format d'origine, annulation par Retour arrière.
+  tracé sur la photo remise dans le bon sens (EXIF) puis éventuellement pivotée ;
+  le rognage est enregistré dans le sens d'origine, et la rotation reste en
+  attente, comme les bandeaux, qui suivent le nouveau cadrage. Mêmes garanties
+  qu'à la censure : copie de sauvegarde, réenregistrement dans le format
+  d'origine, annulation par Retour arrière.
 - **Mode revue** : ne revoit et ne déplace que vers les quatre dossiers de tri ;
   la touche du dossier revu laisse la photo en place. **Aucun déplacement
   n'écrase un fichier** portant déjà le même nom.
@@ -229,11 +241,14 @@ implémentés :
   existent.** [7.1]
 - **La préparation automatique ne se rejoue jamais** à la reprise d'un événement
   existant. [5, 10]
-- **Rien n'est écrit sur le disque tant que la photo n'est pas validée** à
-  l'étape de censure : les bandeaux sont provisoires à l'écran. [9.3]
+- **Rien n'est écrit sur le disque tant que la photo n'est pas validée** (Entrée
+  ou touche de tri) : bandeaux et rotation sont provisoires à l'écran. [9.3]
 - **Réenregistrement dans le format d'origine** : un JPEG reste JPEG, un PNG
   reste PNG, un HEIC reste HEIC ; le fichier existant est **remplacé sur
-  place**, la photo n'est pas déplacée. [9.5]
+  place**. [9.5] Les **données EXIF** (date de prise de vue…) et le **profil de
+  couleurs** sont réécrits avec la photo : Pillow les perd sinon. L'étiquette
+  d'orientation, elle, a été retirée à la lecture, la photo étant enregistrée
+  droite.
 - **Remettre la photo dans le bon sens (EXIF) avant** d'incruster les bandeaux,
   afin qu'ils soient enregistrés exactement là où l'utilisateur les a placés à
   l'écran. [9.5]
