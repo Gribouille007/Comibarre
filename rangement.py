@@ -36,7 +36,8 @@ from censure import OutilBandeaux
 from ecritures import EcrituresEnArrierePlan, signaler_les_echecs
 from images import ChargeurAnticipe, copie_de_sauvegarde, fabriquer_apercu
 from polices import police
-from retouches import appliquer_retouches, enregistrer_retouches
+from retouches import (appliquer_retouches, chemin_sans_barre, enregistrer_retouches,
+                       tourner_sans_barre)
 from rognage import cadre_dans_le_sens_d_origine, rogner_fichier, rogner_image
 from visages import DetecteurVisages, DetectionAnticipee
 from visionneuse import Visionneuse
@@ -482,9 +483,54 @@ class FenetreRangement:
                 "fichier": nom_fichier,
                 "emplacement": dossier_actuel,
                 "sauvegarde": sauvegarde,
+                "sans_barre": self._garder_sans_barre(sauvegarde, chemin, bandeaux, rotation),
                 "index": self.position,
             })
         self.suivante()
+
+    def _garder_sans_barre(self, sauvegarde, chemin, bandeaux, rotation):
+        """Range une copie de la photo sans ses bandeaux dans « Sans-barre ».
+
+        Le dossier « Sans-barre » est cree a cote de la photo barree. La copie
+        part de la sauvegarde intacte, et recoit la meme rotation que la photo
+        barree. Si une version sans barre existe deja (photo barree une seconde
+        fois), elle est gardee : c'est elle qui n'a aucun bandeau.
+
+        Renvoie le chemin de la copie creee, ou None si rien n'a ete cree.
+        """
+        copie = chemin_sans_barre(chemin)
+        if not bandeaux or os.path.exists(copie):
+            return None
+        os.makedirs(os.path.dirname(copie), exist_ok=True)
+        shutil.copy2(sauvegarde, copie)
+        if rotation:
+            self.ecritures.ajouter(copie, tourner_sans_barre, copie, rotation)
+        return copie
+
+    def _deplacer_sans_barre(self, ancien_chemin, nouveau_chemin):
+        """Deplace la version sans bandeaux d'une photo, si elle en a une, avec elle."""
+        depart = chemin_sans_barre(ancien_chemin)
+        arrivee = chemin_sans_barre(nouveau_chemin)
+        if not os.path.isfile(depart) or os.path.exists(arrivee):
+            return
+        self.ecritures.attendre(depart)
+        os.makedirs(os.path.dirname(arrivee), exist_ok=True)
+        shutil.move(depart, arrivee)
+        self._effacer_si_vide(os.path.dirname(depart))
+
+    def _retirer_sans_barre(self, action):
+        """Efface la version sans bandeaux creee par une action que l'on annule."""
+        copie = action.get("sans_barre")
+        if copie and os.path.isfile(copie):
+            os.remove(copie)
+            self._effacer_si_vide(os.path.dirname(copie))
+
+    def _effacer_si_vide(self, dossier):
+        """Supprime un dossier « Sans-barre » devenu vide."""
+        try:
+            os.rmdir(dossier)       # echoue sans rien effacer s'il reste un fichier
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------
     # Rangement et navigation
@@ -530,10 +576,14 @@ class FenetreRangement:
         os.makedirs(os.path.dirname(destination), exist_ok=True)
         shutil.move(chemin, destination)
         self.chargeur.changer_chemin(self.position, destination)
+        # Une version sans bandeaux gardee auparavant suit la photo.
+        self._deplacer_sans_barre(chemin, destination)
         # Les retouches sont enregistrees a la nouvelle place, en arriere-plan :
         # la fenetre n'attend pas la fin de l'encodage pour passer a la suite.
+        sans_barre = None
         if retouches is not None:
             self.ecritures.ajouter(destination, enregistrer_retouches, destination, *retouches)
+            sans_barre = self._garder_sans_barre(sauvegarde, destination, *retouches)
 
         # L'historique permet d'annuler plusieurs actions de suite. Le dossier
         # de depart y est note, car en revue (ou apres un retour en arriere)
@@ -545,6 +595,7 @@ class FenetreRangement:
             "depuis": dossier_actuel,
             "dossier": nom_dossier,
             "sauvegarde": sauvegarde,
+            "sans_barre": sans_barre,
             "index": self.position,
         })
         self.position += 1
@@ -647,6 +698,7 @@ class FenetreRangement:
         derniere = historique.pop()
         if derniere.get("action") in ("rognage", "retouche"):
             self._remettre_la_sauvegarde(derniere)
+            self._retirer_sans_barre(derniere)
         else:
             self._annuler_deplacement(derniere)
 
@@ -668,6 +720,10 @@ class FenetreRangement:
         if os.path.isfile(chemin_actuel) and not os.path.exists(chemin_retour):
             shutil.move(chemin_actuel, chemin_retour)
             self.chargeur.changer_chemin(deplacement["index"], chemin_retour)
+            # La version sans bandeaux creee par ce rangement disparait avec
+            # ses bandeaux ; une version plus ancienne revient avec la photo.
+            self._retirer_sans_barre(deplacement)
+            self._deplacer_sans_barre(chemin_actuel, chemin_retour)
             sauvegarde = deplacement.get("sauvegarde")
             if sauvegarde and os.path.isfile(sauvegarde):
                 os.replace(sauvegarde, chemin_retour)
@@ -730,7 +786,11 @@ class FenetreRangement:
         for action in self.etat["historique"]:
             if action.get("action") in ("rognage", "retouche"):
                 continue
+            # Sans sa sauvegarde, la photo garde ses bandeaux meme annulee :
+            # sa version sans barre ne doit donc plus etre effacee, seulement
+            # suivre la photo.
             action["sauvegarde"] = None
+            action["sans_barre"] = None
             historique.append(action)
         self.etat["historique"] = historique
         self.suivi.enregistrer()

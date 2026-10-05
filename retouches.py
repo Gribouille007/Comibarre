@@ -12,6 +12,8 @@ donc incrustes d'abord, et la photo n'est pivotee qu'ensuite. Ils se retrouvent
 ainsi exactement la ou l'utilisateur les a vus a l'ecran.
 """
 
+import os
+
 from PIL import Image
 
 from bandeaux import remplir_polygone_lisse
@@ -55,3 +57,20 @@ def enregistrer_retouches(chemin, liste_bandeaux, rotation):
     format_image = format_origine(chemin)
     image = appliquer_retouches(charger_image(chemin), liste_bandeaux, rotation)
     enregistrer_au_format_origine(image, chemin, format_image)
+
+
+# Sous-dossier ou est gardee la version sans bandeaux d'une photo barree. Il
+# est cree a cote de la photo, dans le dossier ou elle se trouve ; les listes
+# de photos ignorent les sous-dossiers, il n'est donc jamais revu.
+DOSSIER_SANS_BARRE = "Sans-barre"
+
+
+def chemin_sans_barre(chemin_photo):
+    """Chemin de la version sans bandeaux de cette photo, dans « Sans-barre »."""
+    return os.path.join(os.path.dirname(chemin_photo), DOSSIER_SANS_BARRE,
+                        os.path.basename(chemin_photo))
+
+
+def tourner_sans_barre(chemin, rotation):
+    """Pivote la version sans bandeaux comme la photo barree (arriere-plan)."""
+    enregistrer_retouches(chemin, [], rotation)

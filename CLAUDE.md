@@ -281,6 +281,11 @@ implémentés :
   porte un numéro unique, pour qu'une photo modifiée deux fois n'écrase jamais
   sa sauvegarde précédente. **Aucune photo d'origine ne
   doit être perdue en cours de session.** [9.6]
+- **Version sans barre** (décision de l'utilisateur, 5 octobre 2026) : quand
+  une photo est validée avec des bandeaux, une copie sans bandeaux (même
+  rotation) est rangée dans un sous-dossier `Sans-barre/` du dossier où va la
+  photo. Elle suit la photo à chaque déplacement, disparaît si l'on annule, et
+  n'est jamais écrasée si la photo est barrée de nouveau.
 - **Le fichier de suivi est mis à jour à chaque action** de l'utilisateur
   (rangement, passage, pose de bandeau, annulation). [10]
 - **Échap enregistre l'avancement puis ferme proprement.** [8.2, 9.5]

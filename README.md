@@ -227,6 +227,11 @@ la barre du bas les signale en orange, « À enregistrer : rotation 90°,
 **Espace**, les **flèches** et **Échap** les abandonnent : la photo reste
 intacte. Le zoom, lui, n'est jamais enregistré.
 
+Quand une photo est enregistrée **avec des bandeaux**, sa version sans bandeaux
+est gardée dans un sous-dossier **`Sans-barre`** du dossier où va la photo
+(par exemple `Dossier 1/Sans-barre/12.jpg`). Elle suit la photo si on la range
+ailleurs, et disparaît si l'on annule (Retour arrière).
+
 La photo est réenregistrée dans son format d'origine, en gardant sa date de
 prise de vue et ses autres informations (EXIF), ainsi que son profil de
 couleurs. Une photo sans retouche n'est jamais réécrite.
