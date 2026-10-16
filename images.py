@@ -12,7 +12,7 @@ import shutil
 import threading
 import time
 
-from PIL import Image, ImageOps
+from PIL import ExifTags, Image, ImageOps
 import pillow_heif
 
 # Enregistre le format HEIC aupres de Pillow (photos d'iPhone).
@@ -29,6 +29,24 @@ EXTENSIONS_IMAGE = {
 # Formats dans lesquels Pillow sait reecrire les donnees EXIF et le profil de
 # couleurs de la photo.
 FORMATS_AVEC_EXIF = {"JPEG", "PNG", "HEIF", "HEIC", "WEBP"}
+
+# Extensions que le logiciel sait reenregistrer sans degrader la photo
+# (CLAUDE.md, section 8). Les autres extensions de EXTENSIONS_IMAGE sont
+# triees et renommees, mais ni rognees ni censurees : voir est_modifiable.
+EXTENSIONS_MODIFIABLES = {".jpg", ".jpeg", ".jpe", ".png", ".heic", ".heif", ".webp"}
+
+
+def est_modifiable(nom_fichier):
+    """La photo peut-elle etre rognee ou censuree sans perte ?
+
+    Le tri accepte plus de formats que la retouche. Un BMP, un GIF ou un TIFF
+    se trie et se renomme sans risque, puisque le fichier n'est pas touche,
+    mais le reenregistrer le degraderait : un GIF ne retient que 256 couleurs,
+    et ni l'un ni l'autre ne conserve ses donnees EXIF a la reecriture. Plutot
+    que d'abimer la photo en silence, le logiciel refuse de la modifier et le
+    dit (voir rangement.py).
+    """
+    return os.path.splitext(nom_fichier)[1].lower() in EXTENSIONS_MODIFIABLES
 
 
 def est_une_image(nom_fichier):
@@ -53,9 +71,19 @@ def charger_image(chemin):
     correctement. `exif_transpose` applique cette rotation et retire l'etiquette,
     de sorte que la suite du programme n'a plus jamais a s'en soucier : les
     coordonnees a l'ecran et celles de l'image enregistree coincident.
+
+    Le `with` ferme explicitement le fichier d'origine. En pratique Pillow le
+    ferme deja de lui-meme, des que `exif_transpose` lit les pixels (verifie
+    par mesure : `fp` vaut bien None au retour, avec comme sans etiquette
+    d'orientation). Mais cela repose sur un detail de fonctionnement de Pillow,
+    et non sur une garantie : un format futur, ou une photo tronquee, pourrait
+    s'arreter avant la lecture complete et laisser le fichier ouvert. Sous
+    Windows, un fichier ouvert ne peut etre ni remplace ni deplace, ce qui
+    ferait echouer un rognage ou un rangement. Le `with` est donc la pour
+    garantir ce que Pillow ne promet pas.
     """
-    image = Image.open(chemin)
-    image = ImageOps.exif_transpose(image)
+    with Image.open(chemin) as fichier_ouvert:
+        image = ImageOps.exif_transpose(fichier_ouvert)
     if image.mode not in ("RGB", "RGBA"):
         image = image.convert("RGB")
     return image
@@ -107,6 +135,7 @@ def enregistrer_au_format_origine(image, chemin, format_image):
     if format_image in FORMATS_AVEC_EXIF:
         exif = image.getexif()
         if exif:
+            _mettre_a_jour_les_dimensions_exif(exif, image.size)
             options["exif"] = exif.tobytes()
         if image.info.get("icc_profile"):
             options["icc_profile"] = image.info["icc_profile"]
@@ -114,6 +143,35 @@ def enregistrer_au_format_origine(image, chemin, format_image):
     chemin_temporaire = chemin + ".tmp"
     image.save(chemin_temporaire, format=format_image, **options)
     _remplacer_fichier(chemin_temporaire, chemin)
+
+
+# Etiquettes EXIF donnant les dimensions de la photo, dans le bloc Exif :
+# ExifImageWidth et ExifImageHeight.
+ETIQUETTE_LARGEUR_EXIF = 0xA002
+ETIQUETTE_HAUTEUR_EXIF = 0xA003
+
+
+def _mettre_a_jour_les_dimensions_exif(exif, taille):
+    """Fait suivre aux dimensions inscrites dans l'EXIF celles de la photo.
+
+    Les photos portent dans leurs donnees EXIF leur propre largeur et hauteur.
+    Un rognage ou un quart de tour les change, mais l'EXIF, lui, est recopie
+    tel quel : le fichier annoncait alors une taille qui n'etait plus la
+    sienne. Mesure sur une photo de 1200x800 rognee a 600x400 : l'EXIF
+    continuait d'annoncer 1200x800.
+
+    Ce n'est pas qu'une question de proprete. Certaines visionneuses et
+    certains sites se fient a ces deux etiquettes plutot qu'a l'image
+    elle-meme, et affichent alors la photo deformee.
+
+    Les etiquettes absentes ne sont pas ajoutees : on ne corrige que ce que la
+    photo declarait deja.
+    """
+    details = exif.get_ifd(ExifTags.IFD.Exif)
+    for etiquette, valeur in ((ETIQUETTE_LARGEUR_EXIF, taille[0]),
+                              (ETIQUETTE_HAUTEUR_EXIF, taille[1])):
+        if etiquette in details:
+            details[etiquette] = valeur
 
 
 def _remplacer_fichier(source, destination):

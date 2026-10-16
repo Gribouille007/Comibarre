@@ -17,6 +17,7 @@ import shutil
 import tkinter as tk
 from tkinter import filedialog, ttk
 
+import theme
 from images import est_une_image
 from polices import police
 
@@ -109,15 +110,17 @@ def dupliquer_dossier(parent, dossier_evenement, nom_source, nom_destination):
     attente.title("Duplication")
     attente.resizable(False, False)
     attente.transient(parent)
-    attente.grab_set()
     attente.protocol("WM_DELETE_WINDOW", lambda: None)   # on ne ferme pas en pleine copie
+    theme.habiller(attente)
 
-    cadre = ttk.Frame(attente, padding=24)
+    cadre = ttk.Frame(attente, padding=theme.MARGE)
     cadre.grid(row=0, column=0)
     ttk.Label(cadre, text="Copie de « %s » vers « %s »" % (nom_source, nom_destination),
-              font=police(10, gras=True)).grid(row=0, column=0)
-    etiquette = ttk.Label(cadre, text="Preparation...")
-    etiquette.grid(row=1, column=0, pady=(8, 0))
+              font=police(11, gras=True)).grid(row=0, column=0)
+    etiquette = ttk.Label(cadre, text="Preparation...", style="Doux.TLabel")
+    etiquette.grid(row=1, column=0, pady=(10, 0))
+    theme.centrer(attente, parent)
+    attente.grab_set()
     attente.update()
 
     try:

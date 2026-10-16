@@ -8,6 +8,13 @@ rotation et le cadre de rognage ne sont que des propositions a l'ecran. C'est
 la fenetre (rangement.py) qui les fait enregistrer, et seulement quand
 l'utilisateur valide.
 
+Le rognage se fait en reduisant les bords de la photo, comme sur un telephone
+(decision de l'utilisateur, 16 octobre 2026) : a l'ouverture, le cadre epouse
+la photo entiere, et l'on tire l'un de ses quatre bords, l'un de ses quatre
+coins, ou le cadre entier. Auparavant il fallait tracer un rectangle a la
+souris, ce qui obligeait a repartir de zero des qu'on l'avait mal place, et ne
+permettait pas de ne retirer qu'une bande sur un seul cote.
+
 En mode « barrer », les clics sur la photo sont confies a un outil (voir
 censure.py), qui pose et retouche les bandeaux. La visionneuse lui transmet les
 clics en coordonnees de la photo d'origine, et lui laisse peindre ses bandeaux
@@ -26,6 +33,7 @@ import tkinter as tk
 
 from PIL import Image, ImageEnhance, ImageTk
 
+import theme
 from polices import police
 
 # Bornes du zoom. 1.0 correspond a la photo entiere ajustee a la fenetre.
@@ -37,18 +45,48 @@ PAS_DE_ZOOM = 1.15
 # La partie qui sera coupee est assombrie, pour bien voir ce qui restera.
 LUMINOSITE_HORS_CADRE = 0.35
 
-# Un cadre plus petit que ceci, en pixels de la photo, est considere comme un
-# simple clic et non comme un rognage voulu.
+# Un cadre plus petit que ceci, en pixels de la photo, ne correspond pas a un
+# rognage voulu : il est ignore.
 TAILLE_MINIMALE_CADRE = 10
 
 # Deplacement, en pixels ecran, en dessous duquel un appui suivi d'un
 # relachement compte comme un simple clic, et non comme un glissement.
 SEUIL_DE_GLISSEMENT = 4
 
-COULEUR_FOND = "#1e1e1e"
-COULEUR_TEXTE = "#f0f0f0"
-COULEUR_ERREUR = "#ff8080"
+# --- Rognage -------------------------------------------------------------
+# Ces distances sont exprimees en pixels d'ecran, et non en pixels de la photo :
+# les bords du cadre s'attrapent ainsi toujours aussi facilement, que la photo
+# mesure 600 ou 6000 pixels de large.
+TOLERANCE_BORD = 12          # distance a laquelle un bord ou un coin se saisit
+COTE_MINIMAL_ECRAN = 44      # cote minimal du cadre : en dessous, on ne pourrait
+                             # plus rattraper ses bords a la souris
+LONGUEUR_EQUERRE = 26        # trait d'angle, aux quatre coins du cadre
+LONGUEUR_TRAIT_MILIEU = 24   # trait au milieu de chaque bord
+EPAISSEUR_TRAIT_PRISE = 3
+# Espace laisse autour de la photo pendant le rognage. Sans lui, le cadre part
+# colle aux bords de la fenetre : ses prises sont alors a moitie hors de
+# l'ecran, et le bord exterieur est penible a attraper a la souris.
+MARGE_ROGNAGE = 48
+
+# Forme du pointeur au-dessus de chaque partie du cadre. Elle annonce a
+# l'utilisateur ce qu'un appui va faire, avant qu'il n'appuie.
+CURSEURS_ROGNAGE = {
+    "gauche": "sb_h_double_arrow",
+    "droite": "sb_h_double_arrow",
+    "haut": "sb_v_double_arrow",
+    "bas": "sb_v_double_arrow",
+    "haut_gauche": "top_left_corner",
+    "haut_droite": "top_right_corner",
+    "bas_gauche": "bottom_left_corner",
+    "bas_droite": "bottom_right_corner",
+    "interieur": "fleur",
+}
+
+COULEUR_FOND = theme.NOIR_PHOTO
+COULEUR_TEXTE = theme.TEXTE
+COULEUR_ERREUR = theme.ALERTE
 COULEUR_CADRE = "#ffffff"
+COULEUR_GRILLE = "#8f8f8f"
 
 
 class Visionneuse:
@@ -62,8 +100,11 @@ class Visionneuse:
       taille de la fenetre et de la version de la photo utilisee pour dessiner.
     """
 
-    def __init__(self, parent):
+    def __init__(self, parent, au_changement_du_cadre=None):
+        """`au_changement_du_cadre` est appele chaque fois que le cadre de
+        rognage bouge, pour que la fenetre puisse en afficher les dimensions."""
         self.canvas = tk.Canvas(parent, bg=COULEUR_FOND, highlightthickness=0)
+        self.au_changement_du_cadre = au_changement_du_cadre
 
         self.image = None             # photo entiere, dans son sens d'origine
         self.apercu = None            # la meme, reduite a la taille de l'affichage
@@ -90,18 +131,27 @@ class Visionneuse:
         self.rendu_nu = None          # la meme, sans les bandeaux de l'outil
         self.cle_rendu = None         # ce qui a servi a fabriquer rendu_nu
         self.photo_tk = None          # la meme, convertie pour Tkinter
-        self.photo_sombre_tk = None   # la meme assombrie (rognage uniquement)
-        self.photo_cadre_tk = None    # partie claire, a l'interieur du cadre
+        self.image_sombre = None      # la meme assombrie (rognage uniquement)
+        self.bandes_tk = []           # bandes sombres autour du cadre de rognage
+        self.cle_bandes = None        # decoupes qui ont servi a les fabriquer
         self.element_photo = None     # identifiant de la photo dans le canvas
+
+        # Forme du pointeur actuellement demandee. Le pointeur est regle ici, et
+        # nulle part ailleurs : voir definir_curseur.
+        self.curseur = ""
 
         # Dessin differe : voir demander_dessin.
         self.dessin_programme = None
         self.photo_a_redessiner = False
 
-        # Rognage : actif ou non, point de depart du trace, cadre obtenu.
+        # Rognage. Le cadre est exprime en pixels de la photo affichee ; il
+        # couvre la photo entiere tant qu'on ne l'a pas reduit.
         self.en_rognage = False
-        self.depart_cadre = None
         self.cadre = None             # (gauche, haut, droite, bas) ou None
+        self.prise_rognage = None     # bord, coin ou « interieur » en cours de
+                                      # deplacement, ou None si rien n'est saisi
+        self.cadre_au_depart = None   # cadre au moment ou la prise a ete saisie
+        self.depart_ecran = None      # point du canvas ou elle a ete saisie
 
         # La molette : Windows et macOS envoient <MouseWheel> avec un sens dans
         # `delta` ; X11, donc la plupart des Linux, envoie plutot un clic du
@@ -140,6 +190,20 @@ class Visionneuse:
         self._remettre_a_zero()
         self.demander_dessin()
 
+    def remplacer_apercu(self, apercu):
+        """Remplace l'apercu de la photo affichee par une version d'une autre taille.
+
+        Sert apres un redimensionnement de la fenetre, ou les apercus sont
+        refaits a la nouvelle taille d'affichage. Contrairement a `montrer`,
+        cette methode ne touche ni au zoom, ni a la rotation, ni au cadre de
+        rognage : seule change la version de la photo qui sert a dessiner.
+        """
+        if self.image is None or apercu is None:
+            return
+        self.apercu = apercu
+        self._appliquer_rotation()
+        self.demander_dessin()
+
     def afficher_texte(self, texte):
         """Remplace la photo par un simple texte (chargement, ecran de fin...)."""
         self.image = None
@@ -162,29 +226,75 @@ class Visionneuse:
         self.demander_dessin()
 
     def commencer_rognage(self):
-        """Montre la photo entiere ; cliquer-glisser trace alors un cadre."""
+        """Montre la photo entiere, cadre de rognage pose sur ses quatre bords.
+
+        Le cadre part de la photo entiere, et non d'un rectangle vide : on le
+        reduit en tirant ses bords, comme sur un telephone. Tant qu'aucun bord
+        n'a bouge, valider ne rogne donc rien.
+        """
         self._remettre_a_zero()
         self.en_rognage = True
+        largeur_photo, hauteur_photo = self._dimensions()
+        self.cadre = (0.0, 0.0, float(largeur_photo), float(hauteur_photo))
         self.demander_dessin()
 
     def arreter_rognage(self):
         self.en_rognage = False
         self.cadre = None
-        self.depart_cadre = None
-        self._demander_dessin_du_cadre()
+        self._oublier_la_prise()
+        self.definir_curseur("")
+        # Dessin complet, et non du seul cadre : la photo reprend toute la
+        # place, l'espace laisse autour d'elle pendant le rognage disparaissant
+        # avec lui (voir _facteur).
+        self.demander_dessin()
 
     def cadre_de_rognage(self):
-        """Cadre trace par l'utilisateur, en pixels entiers de la photo affichee.
+        """Cadre a decouper, en pixels entiers de la photo affichee.
 
-        Renvoie None si aucun cadre n'a ete trace, ou s'il est trop petit pour
-        correspondre a un rognage voulu.
+        Renvoie None quand il n'y a rien a rogner : soit le cadre couvre encore
+        toute la photo, soit il est trop petit pour correspondre a un rognage
+        voulu. L'appelant ne doit alors rien reenregistrer, ce qui eviterait une
+        recompression qui degraderait la photo sans la modifier.
         """
         if self.cadre is None:
             return None
+        largeur_photo, hauteur_photo = self._dimensions()
         gauche, haut, droite, bas = (round(valeur) for valeur in self.cadre)
+        if (gauche <= 0 and haut <= 0
+                and droite >= round(largeur_photo) and bas >= round(hauteur_photo)):
+            return None
         if droite - gauche < TAILLE_MINIMALE_CADRE or bas - haut < TAILLE_MINIMALE_CADRE:
             return None
         return (gauche, haut, droite, bas)
+
+    def taille_du_cadre(self):
+        """Dimensions du cadre de rognage en pixels, ou None s'il n'y a rien a rogner.
+
+        Sert a les afficher dans la barre du bas : l'utilisateur voit ainsi
+        exactement ce qu'il garde pendant qu'il ajuste les bords.
+        """
+        cadre = self.cadre_de_rognage()
+        if cadre is None:
+            return None
+        return (cadre[2] - cadre[0], cadre[3] - cadre[1])
+
+    def definir_curseur(self, forme):
+        """Change la forme du pointeur, en retombant sur la fleche si inconnue.
+
+        Toutes les formes ne sont pas connues sur tous les systemes (CLAUDE.md,
+        section 4 ter) : d'ou le `try`. Le pointeur est regle ici, et nulle part
+        ailleurs, pour que le rognage et le mode barrer ne se le disputent pas :
+        auparavant, entrer en rognage faisait reclamer la fleche ordinaire par
+        l'outil bandeaux, qui effacait aussitot le pointeur du rognage.
+        """
+        if forme == self.curseur:
+            return
+        self.curseur = forme
+        try:
+            self.canvas.config(cursor=forme)
+        except tk.TclError:
+            self.canvas.config(cursor="")
+            self.curseur = ""
 
     def arreter(self):
         """Annule un dessin programme. A appeler avant de fermer la fenetre."""
@@ -286,7 +396,18 @@ class Visionneuse:
         self.glissement = None
         self.en_rognage = False
         self.cadre = None
-        self.depart_cadre = None
+        self._oublier_la_prise()
+        # Le pointeur revient a la fleche ordinaire : sans cela, il gardait la
+        # forme de la derniere prise du cadre (une fleche d'angle, par exemple)
+        # apres un rognage valide, et restait ainsi tant que l'outil bandeaux
+        # n'avait pas repris la main, ce qui n'arrive pas hors du mode barrer.
+        self.definir_curseur("")
+
+    def _oublier_la_prise(self):
+        """Oublie le bord ou le coin du cadre que la souris tenait."""
+        self.prise_rognage = None
+        self.cadre_au_depart = None
+        self.depart_ecran = None
 
     def _appliquer_rotation(self):
         """Fait pivoter l'apercu, seulement quand la photo ou la rotation change.
@@ -313,10 +434,16 @@ class Visionneuse:
         return largeur, hauteur
 
     def _facteur(self):
-        """Rapport entre un pixel de la photo et un pixel de l'ecran, zoom compris."""
+        """Rapport entre un pixel de la photo et un pixel de l'ecran, zoom compris.
+
+        Pendant le rognage, la photo est un peu reduite pour qu'un espace
+        subsiste tout autour : le cadre commence sur ses bords, et il faut
+        pouvoir les saisir sans buter sur le bord de la fenetre.
+        """
         largeur_photo, hauteur_photo = self._dimensions()
-        largeur = max(self.canvas.winfo_width(), 1)
-        hauteur = max(self.canvas.winfo_height(), 1)
+        marge = 2 * MARGE_ROGNAGE if self.en_rognage else 0
+        largeur = max(self.canvas.winfo_width() - marge, 1)
+        hauteur = max(self.canvas.winfo_height() - marge, 1)
         return min(largeur / largeur_photo, hauteur / hauteur_photo) * self.zoom
 
     def _zone_visible(self, facteur):
@@ -435,12 +562,17 @@ class Visionneuse:
             self.outil.peindre(self.rendu, vers_rendu)
 
         self.photo_tk = ImageTk.PhotoImage(self.rendu)
-        self.photo_sombre_tk = None
+        # La portion affichee vient d'etre refaite : les bandes sombres gardees
+        # pour le cadre ne correspondent plus a rien et seront redecoupees.
+        self.image_sombre = None
+        self.bandes_tk = []
+        self.cle_bandes = None
         if self.en_rognage:
-            # Preparee une fois pour toutes : le trace du cadre n'aura plus
-            # qu'a la montrer (voir _dessiner_cadre).
-            sombre = ImageEnhance.Brightness(self.rendu).enhance(LUMINOSITE_HORS_CADRE)
-            self.photo_sombre_tk = ImageTk.PhotoImage(sombre)
+            # Version assombrie de la portion visible, preparee une fois par
+            # photo (environ 8 millisecondes) : le trace du cadre n'a plus qu'a
+            # y decouper les bandes qui entourent le cadre.
+            self.image_sombre = ImageEnhance.Brightness(
+                self.rendu).enhance(LUMINOSITE_HORS_CADRE)
 
         self.coin_ecran = ((largeur_canvas - cible[0]) // 2,
                            (hauteur_canvas - cible[1]) // 2)
@@ -451,41 +583,135 @@ class Visionneuse:
     def _dessiner_cadre(self):
         """Dessine le cadre de rognage par-dessus la photo deja affichee.
 
-        Pendant qu'on trace le cadre, la photo elle-meme n'est pas recalculee.
-        Deux versions en ont ete preparees : l'une normale, l'autre assombrie.
-        La version assombrie occupe le fond, et on pose par-dessus, a
-        l'interieur du cadre, le morceau correspondant de la version normale :
-        ce qui sera coupe apparait sombre, ce qui restera garde sa luminosite.
+        Pendant qu'on ajuste le cadre, la photo elle-meme n'est pas recalculee :
+        elle reste affichee telle quelle, en clair, et l'on pose par-dessus
+        quatre bandes assombries, celles qui entourent le cadre. Ce qui sera
+        coupe apparait donc sombre, ce qui restera garde sa luminosite.
+
+        Pourquoi les bandes plutot que l'inverse. On obtient le meme resultat en
+        assombrissant toute la photo et en reposant la partie claire a
+        l'interieur du cadre, et c'est ce que faisait la version precedente. Le
+        temps passe suit le nombre de pixels reposes a l'ecran : la partie
+        claire est grande quand le cadre est grand, les bandes sont grandes
+        quand il est petit. Or le rognage par les bords part toujours du cadre
+        plein et ne fait que l'entamer. Mesures sur une photo de 24 millions de
+        pixels affichee en 1620 x 1080, pour un ajustement complet :
+
+            cadre a 95 % de la photo    3,3 ms   (contre 14,1 ms avant)
+            cadre a 50 %               13,1 ms
+            cadre a 10 %               16,0 ms
+
+        La methode retenue est donc quatre fois plus rapide dans le cas de loin
+        le plus courant. Son cas defavorable, un cadre reduit au dixieme de la
+        photo, atteint le budget de 16,7 ms d'une image a 60 par seconde, mais
+        sans consequence visible : les mouvements de souris sont regroupes par
+        `after_idle` (voir demander_dessin), si bien que le cadre ne prend
+        jamais de retard sur la souris, meme lorsqu'un dessin depasse.
         """
         self.canvas.delete("cadre")
         if self.element_photo is None:
             return
-
-        cadre_visible = (self.en_rognage and self.cadre is not None
-                         and self.photo_sombre_tk is not None)
-        fond = self.photo_sombre_tk if cadre_visible else self.photo_tk
-        self.canvas.itemconfig(self.element_photo, image=fond)
-        if not cadre_visible:
+        if not (self.en_rognage and self.cadre is not None
+                and self.image_sombre is not None):
+            self.bandes_tk = []
+            self.cle_bandes = None
             return
 
         # Le cadre est exprime en pixels de la photo : on le ramene aux pixels
         # de l'image affichee, qui commence au coin de la vue.
         facteur = self._facteur()
-        gauche = max(0, round((self.cadre[0] - self.vue_x) * facteur))
-        haut = max(0, round((self.cadre[1] - self.vue_y) * facteur))
-        droite = min(self.rendu.width, round((self.cadre[2] - self.vue_x) * facteur))
-        bas = min(self.rendu.height, round((self.cadre[3] - self.vue_y) * facteur))
+        largeur = self.rendu.width
+        hauteur = self.rendu.height
+        gauche = max(0, min(largeur, round((self.cadre[0] - self.vue_x) * facteur)))
+        haut = max(0, min(hauteur, round((self.cadre[1] - self.vue_y) * facteur)))
+        droite = max(0, min(largeur, round((self.cadre[2] - self.vue_x) * facteur)))
+        bas = max(0, min(hauteur, round((self.cadre[3] - self.vue_y) * facteur)))
 
-        if droite > gauche and bas > haut:
-            self.photo_cadre_tk = ImageTk.PhotoImage(
-                self.rendu.crop((gauche, haut, droite, bas)))
-            self.canvas.create_image(self.coin_ecran[0] + gauche, self.coin_ecran[1] + haut,
-                                     anchor="nw", image=self.photo_cadre_tk, tags="cadre")
+        # Les quatre bandes a assombrir : au-dessus et au-dessous du cadre sur
+        # toute la largeur, puis a sa gauche et a sa droite entre les deux.
+        decoupes = ((0, 0, largeur, haut),
+                    (0, bas, largeur, hauteur),
+                    (0, haut, gauche, bas),
+                    (droite, haut, largeur, bas))
+
+        # On ne redecoupe que si le cadre a reellement bouge : un simple survol,
+        # qui ne change que la forme du pointeur, ne recalcule alors rien.
+        if decoupes != self.cle_bandes:
+            self.bandes_tk = [(decoupe, ImageTk.PhotoImage(self.image_sombre.crop(decoupe)))
+                              for decoupe in decoupes
+                              if decoupe[2] > decoupe[0] and decoupe[3] > decoupe[1]]
+            self.cle_bandes = decoupes
+        for decoupe, bande in self.bandes_tk:
+            self.canvas.create_image(self.coin_ecran[0] + decoupe[0],
+                                     self.coin_ecran[1] + decoupe[1],
+                                     anchor="nw", image=bande, tags="cadre")
 
         ecran_gauche, ecran_haut = self._vers_ecran(self.cadre[0], self.cadre[1])
         ecran_droite, ecran_bas = self._vers_ecran(self.cadre[2], self.cadre[3])
-        self.canvas.create_rectangle(ecran_gauche, ecran_haut, ecran_droite, ecran_bas,
-                                     outline=COULEUR_CADRE, width=2, tags="cadre")
+        self._dessiner_prises(ecran_gauche, ecran_haut, ecran_droite, ecran_bas)
+
+    def _dessiner_prises(self, gauche, haut, droite, bas):
+        """Trace le contour du cadre, ses prises, et la grille des tiers.
+
+        Les prises sont des traits epais : une equerre a chaque coin, et un
+        trait au milieu de chaque bord. Elles disent ou poser la souris, et
+        le trait du milieu montre que c'est le bord entier qui se tire, et pas
+        seulement ses extremites.
+
+        Tous ces traits sont strictement horizontaux ou verticaux : ils ne
+        peuvent donc pas presenter de marches d'escalier, et Tkinter suffit a
+        les dessiner. C'est la seule exception a la regle qui veut que les
+        traces passent par Pillow (voir selection.py) : cette regle ne vise que
+        les obliques, comme les bords inclines d'un bandeau.
+        """
+        largeur = droite - gauche
+        hauteur = bas - haut
+
+        # La grille des tiers n'apparait que pendant l'ajustement. Affichee en
+        # permanence, elle encombrerait la photo sans rien apprendre de plus.
+        if self.prise_rognage is not None:
+            for proportion in (1 / 3, 2 / 3):
+                x = gauche + largeur * proportion
+                y = haut + hauteur * proportion
+                self.canvas.create_line(x, haut, x, bas, fill=COULEUR_GRILLE,
+                                        tags="cadre")
+                self.canvas.create_line(gauche, y, droite, y, fill=COULEUR_GRILLE,
+                                        tags="cadre")
+
+        self.canvas.create_rectangle(gauche, haut, droite, bas,
+                                     outline=COULEUR_CADRE, width=1, tags="cadre")
+
+        # Sur un cadre devenu petit, les prises sont raccourcies pour ne pas se
+        # rejoindre et noyer le cadre sous les traits.
+        equerre = min(LONGUEUR_EQUERRE, largeur / 3, hauteur / 3)
+        for x, y, vers_x, vers_y in ((gauche, haut, 1, 1), (droite, haut, -1, 1),
+                                     (gauche, bas, 1, -1), (droite, bas, -1, -1)):
+            self._trait_de_prise(x, y, x + equerre * vers_x, y)
+            self._trait_de_prise(x, y, x, y + equerre * vers_y)
+
+        demi_horizontal = min(LONGUEUR_TRAIT_MILIEU, largeur / 4) / 2
+        demi_vertical = min(LONGUEUR_TRAIT_MILIEU, hauteur / 4) / 2
+        milieu_x = gauche + largeur / 2
+        milieu_y = haut + hauteur / 2
+        self._trait_de_prise(milieu_x - demi_horizontal, haut,
+                             milieu_x + demi_horizontal, haut)
+        self._trait_de_prise(milieu_x - demi_horizontal, bas,
+                             milieu_x + demi_horizontal, bas)
+        self._trait_de_prise(gauche, milieu_y - demi_vertical,
+                             gauche, milieu_y + demi_vertical)
+        self._trait_de_prise(droite, milieu_y - demi_vertical,
+                             droite, milieu_y + demi_vertical)
+
+    def _trait_de_prise(self, x1, y1, x2, y2):
+        """Trait epais d'une prise du cadre.
+
+        « projecting » prolonge le trait d'une demi-epaisseur a chaque bout :
+        sans cela, les deux traits d'une equerre laisseraient un creux a
+        l'angle exact du cadre.
+        """
+        self.canvas.create_line(x1, y1, x2, y2, fill=COULEUR_CADRE,
+                                width=EPAISSEUR_TRAIT_PRISE, capstyle="projecting",
+                                tags="cadre")
 
     # ------------------------------------------------------------------
     # Souris : deplacement de la vue, ou trace du cadre de rognage
@@ -497,11 +723,14 @@ class Visionneuse:
         self.point_presse = (evenement.x, evenement.y)
         self.a_glisse = False
         if self.en_rognage:
-            # Presser le bouton commence un nouveau cadre : pour corriger un
-            # cadre mal trace, il suffit donc d'en tracer un autre.
-            self.depart_cadre = self._point_dans_la_photo(evenement.x, evenement.y)
-            self.cadre = None
-            self._demander_dessin_du_cadre()
+            # Presser le bouton saisit le bord, le coin ou le cadre qui se
+            # trouve sous la souris. Un appui ailleurs ne saisit rien : le cadre
+            # reste ou il est, au lieu d'etre efface comme avant.
+            self.prise_rognage = self._prise_sous_la_souris(evenement.x, evenement.y)
+            self.cadre_au_depart = self.cadre
+            self.depart_ecran = (evenement.x, evenement.y)
+            if self.prise_rognage is not None:
+                self._demander_dessin_du_cadre()
             return
 
         # En mode barrer, l'outil prend l'appui s'il tombe sur un bandeau ou
@@ -514,6 +743,13 @@ class Visionneuse:
             self.glissement = (evenement.x, evenement.y)
 
     def _souris_glissee(self, evenement):
+        # La photo peut avoir change entre l'appui et ce mouvement : rien
+        # n'empeche d'appuyer sur une touche de tri en maintenant le bouton
+        # enfonce. Sans cette garde, le calcul des coordonnees cherchait la
+        # taille d'une photo devenue absente, et le logiciel s'arretait.
+        if self.image is None:
+            return
+
         if self.point_presse is not None:
             depart_x, depart_y = self.point_presse
             if (abs(evenement.x - depart_x) > SEUIL_DE_GLISSEMENT
@@ -521,7 +757,7 @@ class Visionneuse:
                 self.a_glisse = True
 
         if self.en_rognage:
-            self._tracer_cadre(evenement)
+            self._ajuster_cadre(evenement)
         elif self.clic_pour_l_outil:
             self.outil.glissee(*self.point_d_origine(evenement.x, evenement.y))
         else:
@@ -533,49 +769,148 @@ class Visionneuse:
             self.outil.relachee(*self.point_d_origine(evenement.x, evenement.y),
                                 a_glisse=self.a_glisse)
         self.glissement = None
-        self.depart_cadre = None
         self.point_presse = None
         self.clic_pour_l_outil = False
         self.a_glisse = False
+
+        prise_relachee = self.prise_rognage is not None
+        self._oublier_la_prise()
+        if prise_relachee:
+            # La grille des tiers ne s'affiche que pendant l'ajustement : il
+            # faut donc un dernier dessin pour la faire disparaitre.
+            self._demander_dessin_du_cadre()
 
     def _double_clic(self, evenement):
         if self.outil is not None and not self.en_rognage and self.image is not None:
             self.outil.double_clic(*self.point_d_origine(evenement.x, evenement.y))
 
     def _souris_bougee(self, evenement):
-        """Signale a l'outil ce que survole la souris, bouton relache."""
-        if self.outil is not None and self.point_presse is None:
-            if self.image is None or self.en_rognage:
+        """Annonce ce que la souris survole, bouton relache.
+
+        Pendant le rognage, c'est le cadre qui repond ; sinon, c'est l'outil
+        bandeaux, quand il y en a un.
+        """
+        if self.point_presse is not None:
+            return      # un glissement est en cours : voir _souris_glissee
+        if self.en_rognage:
+            self._survoler_le_cadre(evenement)
+        elif self.outil is not None:
+            if self.image is None:
                 self.outil.survoler(None)
             else:
                 self.outil.survoler(self.point_d_origine(evenement.x, evenement.y))
 
     def _souris_sortie(self, evenement):
-        if self.outil is not None:
+        if self.en_rognage:
+            self.definir_curseur("")
+        elif self.outil is not None:
             self.outil.survoler(None)
 
-    def _tracer_cadre(self, evenement):
-        """Le cadre va du point ou le bouton a ete presse jusqu'a la souris.
+    # ------------------------------------------------------------------
+    # Rognage : saisir un bord, un coin, ou le cadre entier
+    # ------------------------------------------------------------------
 
-        Les coordonnees sont rangees par ordre croissant : l'utilisateur peut
-        ainsi tracer dans n'importe quel sens (vers le haut, vers la gauche...).
+    def _prise_sous_la_souris(self, x_ecran, y_ecran):
+        """Ce que la souris s'apprete a saisir sur le cadre de rognage.
+
+        Renvoie le nom d'un bord (« gauche », « haut »...), d'un coin
+        (« haut_gauche »...), « interieur » pour deplacer le cadre entier, ou
+        None si la souris est ailleurs.
+
+        Les coins sont examines avant les bords : au voisinage d'un angle, les
+        deux zones se recouvrent, et c'est le coin que l'utilisateur vise, car
+        lui seul permet de regler les deux cotes d'un seul geste.
+
+        Les noms composes ne sont pas un detail d'affichage : « haut_gauche »
+        contient « haut » et « gauche », ce qui permet a _cadre_apres_prise de
+        savoir quels bords deplacer sans enumerer les huit cas.
         """
-        if self.depart_cadre is None:
-            return
-        depart_x, depart_y = self.depart_cadre
-        x, y = self._point_dans_la_photo(evenement.x, evenement.y)
-        self.cadre = (min(depart_x, x), min(depart_y, y),
-                      max(depart_x, x), max(depart_y, y))
-        self._demander_dessin_du_cadre()
+        if self.cadre is None:
+            return None
+        gauche, haut = self._vers_ecran(self.cadre[0], self.cadre[1])
+        droite, bas = self._vers_ecran(self.cadre[2], self.cadre[3])
 
-    def _point_dans_la_photo(self, x_ecran, y_ecran):
-        """Point de la photo sous la souris, ramene a l'interieur de la photo.
+        pres_de_gauche = abs(x_ecran - gauche) <= TOLERANCE_BORD
+        pres_de_droite = abs(x_ecran - droite) <= TOLERANCE_BORD
+        pres_du_haut = abs(y_ecran - haut) <= TOLERANCE_BORD
+        pres_du_bas = abs(y_ecran - bas) <= TOLERANCE_BORD
+        # Un bord ne se saisit que sur sa longueur, pas dans son prolongement
+        # au-dela du cadre.
+        dans_la_hauteur = haut - TOLERANCE_BORD <= y_ecran <= bas + TOLERANCE_BORD
+        dans_la_largeur = gauche - TOLERANCE_BORD <= x_ecran <= droite + TOLERANCE_BORD
 
-        Le cadre ne peut ainsi jamais deborder, meme si la souris sort de la photo.
+        if dans_la_hauteur and dans_la_largeur:
+            horizontal = "haut" if pres_du_haut else "bas" if pres_du_bas else ""
+            vertical = "gauche" if pres_de_gauche else "droite" if pres_de_droite else ""
+            if horizontal and vertical:
+                return horizontal + "_" + vertical
+            if horizontal or vertical:
+                return horizontal or vertical
+
+        if gauche < x_ecran < droite and haut < y_ecran < bas:
+            return "interieur"
+        return None
+
+    def _cote_minimal(self):
+        """Cote minimal du cadre, en pixels de la photo.
+
+        Il est fixe en pixels d'ecran puis converti : sur une photo de 6000
+        pixels de large comme sur une de 600, le cadre reste assez grand pour
+        qu'on puisse rattraper ses bords a la souris. Sans cette limite, un
+        geste un peu vif reduirait le cadre a un trait dont plus aucun bord ne
+        serait saisissable.
         """
-        x, y = self._vers_photo(x_ecran, y_ecran)
         largeur_photo, hauteur_photo = self._dimensions()
-        return (max(0.0, min(x, largeur_photo)), max(0.0, min(y, hauteur_photo)))
+        en_pixels_photo = COTE_MINIMAL_ECRAN / max(self._facteur(), 0.0001)
+        return min(max(TAILLE_MINIMALE_CADRE, en_pixels_photo),
+                   largeur_photo, hauteur_photo)
+
+    def _cadre_apres_prise(self, x_ecran, y_ecran):
+        """Nouveau cadre apres avoir tire la prise jusqu'au point (x_ecran, y_ecran).
+
+        Le calcul part toujours du cadre tel qu'il etait au moment de la saisie,
+        et non du cadre courant : les arrondis ne s'accumulent donc pas, et le
+        cadre suit la souris exactement, meme apres un long glissement.
+        """
+        facteur = self._facteur()
+        decalage_x = (x_ecran - self.depart_ecran[0]) / facteur
+        decalage_y = (y_ecran - self.depart_ecran[1]) / facteur
+        gauche, haut, droite, bas = self.cadre_au_depart
+        largeur_photo, hauteur_photo = self._dimensions()
+
+        if self.prise_rognage == "interieur":
+            # Le cadre entier se deplace : sa taille ne change pas, et il reste
+            # entierement dans la photo.
+            largeur_cadre = droite - gauche
+            hauteur_cadre = bas - haut
+            gauche = min(max(gauche + decalage_x, 0.0), largeur_photo - largeur_cadre)
+            haut = min(max(haut + decalage_y, 0.0), hauteur_photo - hauteur_cadre)
+            return (gauche, haut, gauche + largeur_cadre, haut + hauteur_cadre)
+
+        cote = self._cote_minimal()
+        if "gauche" in self.prise_rognage:
+            gauche = min(max(gauche + decalage_x, 0.0), droite - cote)
+        if "droite" in self.prise_rognage:
+            droite = max(min(droite + decalage_x, largeur_photo), gauche + cote)
+        if "haut" in self.prise_rognage:
+            haut = min(max(haut + decalage_y, 0.0), bas - cote)
+        if "bas" in self.prise_rognage:
+            bas = max(min(bas + decalage_y, hauteur_photo), haut + cote)
+        return (gauche, haut, droite, bas)
+
+    def _ajuster_cadre(self, evenement):
+        """Deplace le bord, le coin ou le cadre que la souris tient."""
+        if self.prise_rognage is None or self.cadre_au_depart is None:
+            return
+        self.cadre = self._cadre_apres_prise(evenement.x, evenement.y)
+        self._demander_dessin_du_cadre()
+        if self.au_changement_du_cadre is not None:
+            self.au_changement_du_cadre()
+
+    def _survoler_le_cadre(self, evenement):
+        """Met la forme du pointeur en accord avec ce que la souris survole."""
+        prise = self._prise_sous_la_souris(evenement.x, evenement.y)
+        self.definir_curseur(CURSEURS_ROGNAGE.get(prise, ""))
 
     def _deplacer_vue(self, evenement):
         if self.glissement is None or self.image is None:

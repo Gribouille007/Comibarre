@@ -107,6 +107,13 @@ les yeux, sans monter inutilement sur le front ?
 python tester_bandeau.py
 ```
 
+Un troisième vérifie la **géométrie du cadre de rognage** — tirer un bord
+déplace-t-il le bon côté, y compris quand la photo a été pivotée à l'écran ?
+
+```
+python tester_rognage.py
+```
+
 ### En cas de problème
 
 ```
@@ -209,11 +216,19 @@ en permanence, sous la forme « Photo 12 sur 340 ».
 | **Flèche gauche** | Revenir à la photo précédente, sans rien déplacer ni enregistrer |
 | **Retour arrière** | Annuler la dernière action (rangement, retouche ou rognage) : la photo revient à sa place, dans son état d'avant, et se réaffiche. Plusieurs annulations de suite sont possibles |
 | **R** | Faire pivoter la photo d'un quart de tour (enregistré par Entrée ou une touche de tri) |
-| **C** | Rogner la photo (voir ci-dessous) |
+| **C** | Rogner la photo en réduisant ses bords (voir ci-dessous) |
 | **Tab** | Activer ou désactiver le **mode barrer** les yeux (section 6) |
 | **Molette de la souris** | Agrandir ou réduire la vue (zoom) |
 | **Cliquer-glisser** | Déplacer la vue lorsque la photo est agrandie |
 | **Échap** | Enregistrer l'avancement et fermer |
+
+Pendant le **rognage**, seules trois touches agissent : **Entrée** (rogner),
+**Échap** et **C** (abandonner). Toutes les autres sont inertes.
+
+Une photo au format **BMP, GIF ou TIFF** se trie normalement, mais ne peut être
+ni rognée ni barrée : son format ne se réenregistre pas sans perte de qualité.
+La barre du bas l'indique dès l'affichage, « format non modifiable : tri
+seulement ».
 
 ### Retouches : ce qui est enregistré, et quand
 
@@ -243,13 +258,30 @@ déplace alors de ce dossier vers le nouveau.
 
 ### Rogner une photo
 
-1. Appuyez sur **C** : la photo s'affiche en entier.
-2. **Cliquez-glissez** pour tracer le cadre à garder ; ce qui sera coupé est
-   assombri. Pour corriger, tracez simplement un nouveau cadre.
+Le rognage se fait **en réduisant les bords de la photo**, comme sur un
+téléphone. Il n'y a pas de rectangle à tracer.
+
+1. Appuyez sur **C** : la photo s'affiche en entier, entourée d'un cadre blanc
+   posé sur ses quatre bords.
+2. **Tirez un bord** pour n'enlever qu'un côté, **un coin** pour en régler deux
+   d'un seul geste, ou **glissez à l'intérieur** du cadre pour le déplacer sans
+   changer sa taille. Ce qui sera coupé s'assombrit à mesure, et les dimensions
+   de ce que vous gardez s'affichent dans la barre du bas.
 3. **Entrée** rogne la photo et l'enregistre à sa place, dans son format
    d'origine. **Échap** ou **C** abandonne sans rien modifier.
 
-- Si vous avez pivoté la photo avec R, tracez le cadre sur la photo telle que
+Repères utiles :
+
+- La forme du pointeur dit ce que vous allez saisir : double flèche sur un
+  bord, flèche d'angle sur un coin, croix de déplacement à l'intérieur.
+- Une **grille des tiers** apparaît pendant que vous ajustez, pour vous aider à
+  placer le sujet, et disparaît dès que vous relâchez.
+- Si vous validez sans avoir bougé aucun bord, **rien n'est réenregistré** : le
+  logiciel sort simplement du mode, sans recompresser la photo pour rien.
+- Pendant le rognage, **seules Entrée, Échap et C agissent**. Les autres
+  touches, la molette et le mode barrer sont volontairement inertes, pour que
+  rien ne puisse déplacer ni modifier la photo tant que le cadre est à l'écran.
+- Si vous avez pivoté la photo avec R, réglez le cadre sur la photo telle que
   vous la voyez : le rognage tombe au bon endroit. La rotation reste ensuite
   en attente, comme avant le rognage, et les bandeaux déjà posés suivent le
   nouveau cadrage.
@@ -457,7 +489,7 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 | `tri.py` | Tri : lance la fenêtre de rangement sur le dossier source |
 | `revue.py` | Revue : lance la fenêtre de rangement sur un dossier de tri ou une copie |
 | `rangement.py` | La fenêtre unique : clavier, déplacements, retouches, mode barrer, navigation, annulation |
-| `visionneuse.py` | Affichage d'une photo : zoom, vue, rotation, cadre de rognage, relais des clics |
+| `visionneuse.py` | Affichage d'une photo : zoom, vue, rotation, cadre de rognage par les bords, relais des clics |
 | `rognage.py` | Écriture d'une photo rognée sur le disque |
 | `retouches.py` | Écriture des bandeaux et de la rotation dans la photo |
 | `censure.py` | Mode barrer : pose et retouche des bandeaux à la souris |
@@ -468,11 +500,13 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 | `suivi.py` | Fichier de suivi : enregistrement et reprise |
 | `dossiers.py` | Choix d'un dossier, noms valides, liste des photos, duplication |
 | `polices.py` | Police de caractères du système, la même partout |
+| `theme.py` | Couleurs et styles communs à toutes les fenêtres |
 | `modeles/` | Modèle de détection livré avec le programme |
 | `demarrer.py` | Installation automatique des bibliothèques, puis lancement |
 | `lancer.bat`, `lancer.command`, `lancer.sh` | Lancement par double-clic sous Windows, macOS et Linux |
 | `verifier_installation.py` | Contrôle que l'installation est fonctionnelle |
 | `tester_bandeau.py` | Vérifie que le bandeau couvre les yeux, et rien de plus |
+| `tester_rognage.py` | Vérifie la géométrie du cadre de rognage, rotations comprises |
 
 Les règles de conception du projet sont consignées dans `CLAUDE.md`.
 

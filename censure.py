@@ -13,8 +13,6 @@ bandeaux ne sont que des dessins provisoires ; c'est la fenetre qui les fait
 incruster dans le fichier quand l'utilisateur valide (voir retouches.py).
 """
 
-import tkinter as tk
-
 import selection
 from bandeaux import Bandeau, poignee_sous_la_souris, remplir_polygone_lisse
 from visages import Visage, visage_le_plus_proche
@@ -224,6 +222,14 @@ class OutilBandeaux:
 
     def glissee(self, x, y):
         """Souris deplacee bouton enfonce, sur un bandeau ou une poignee."""
+        # La photo peut avoir change depuis l'appui : rien n'empeche d'appuyer
+        # sur une touche de tri en maintenant le bouton enfonce, et le passage a
+        # la photo suivante vide alors les bandeaux. Sans cette garde, on
+        # tirerait la poignee d'un bandeau qui n'existe plus, et le logiciel
+        # s'arretait.
+        if self.bandeau_selectionne is None or self.dernier_point is None:
+            return
+
         if self.action == "poignee":
             self.bandeau_selectionne.tirer_poignee(self.poignee_active, x, y)
         elif self.action == "corps":
@@ -326,12 +332,10 @@ class OutilBandeaux:
         if nouveau == self.survol:
             return
         self.survol = nouveau
-        canvas = self.visionneuse.canvas
-        try:
-            canvas.config(cursor=POINTEURS.get(nouveau, ""))
-        except tk.TclError:
-            # Ce systeme ne connait pas ce pointeur : la fleche ordinaire fera.
-            canvas.config(cursor="")
+        # C'est la visionneuse qui regle le pointeur, et elle seule : sinon le
+        # mode barrer et le rognage se le disputaient, et entrer en rognage
+        # effacait aussitot le pointeur annoncant le bord a tirer.
+        self.visionneuse.definir_curseur(POINTEURS.get(nouveau, ""))
         self._redessiner()
 
 

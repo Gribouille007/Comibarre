@@ -12,7 +12,6 @@ dans un dossier temporaire, qu'il efface ensuite. Il ne touche a aucun de vos
 fichiers.
 """
 
-import math
 import os
 import shutil
 import sys

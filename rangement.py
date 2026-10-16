@@ -32,9 +32,11 @@ import shutil
 import tkinter as tk
 from tkinter import messagebox
 
+import theme
 from censure import OutilBandeaux
 from ecritures import EcrituresEnArrierePlan, signaler_les_echecs
-from images import ChargeurAnticipe, copie_de_sauvegarde, fabriquer_apercu
+from images import (ChargeurAnticipe, copie_de_sauvegarde, est_modifiable,
+                    fabriquer_apercu)
 from polices import police
 from retouches import (appliquer_retouches, chemin_sans_barre, enregistrer_retouches,
                        tourner_sans_barre)
@@ -42,17 +44,23 @@ from rognage import cadre_dans_le_sens_d_origine, rogner_fichier, rogner_image
 from visages import DetecteurVisages, DetectionAnticipee
 from visionneuse import Visionneuse
 
-COULEUR_FOND = "#1e1e1e"
-COULEUR_BARRE = "#2b2b2b"
-COULEUR_TEXTE = "#f0f0f0"
-COULEUR_RAPPEL = "#b8b8b8"
-COULEUR_ATTENTION = "#ffcc66"     # retouches pas encore enregistrees
-COULEUR_MODE_ACTIF = "#ff6b6b"    # pastille du mode barrer
+COULEUR_FOND = theme.FOND
+COULEUR_BARRE = theme.SURFACE
+COULEUR_TEXTE = theme.TEXTE
+COULEUR_RAPPEL = theme.TEXTE_DOUX
+COULEUR_SEPARATEUR = theme.SEPARATEUR
+COULEUR_ATTENTION = theme.ATTENTION    # retouches pas encore enregistrees
+COULEUR_MODE_ACTIF = theme.ALERTE      # pastille du mode barrer
 
-RAPPEL_ROGNAGE = ("ROGNAGE  -  Tracez un cadre a la souris  |  Entree = rogner la photo  |  "
+RAPPEL_ROGNAGE = ("ROGNAGE  -  Tirez un bord ou un coin pour reduire la photo  |  "
+                  "Glissez dans le cadre pour le deplacer  |  Entree = rogner  |  "
                   "Echap ou C = abandonner sans rien modifier")
 RAPPEL_BARRER = ("BARRER  -  Clic sur une tete = bandeau  |  Clic sur un bandeau = le choisir  |  "
                  "Double-clic = le retirer  |  Glisser dans le vide = deplacer la vue")
+
+# Delai, en millisecondes, avant de refabriquer les apercus apres un
+# redimensionnement de la fenetre. Voir _zone_d_affichage_changee.
+DELAI_APRES_REDIMENSIONNEMENT = 250
 
 # Delai, en millisecondes, avant de regarder de nouveau si une photo (ou ses
 # visages) qui n'etait pas encore prete l'est enfin.
@@ -84,12 +92,28 @@ class FenetreRangement:
         # qu'elle est connue (voir _zone_d_affichage_changee).
         dossier = self._chemin_du_dossier(dossier_origine)
         taille_ecran = (racine.winfo_screenwidth(), racine.winfo_screenheight())
-        self.chargeur = ChargeurAnticipe([os.path.join(dossier, nom) for nom in self.photos],
-                                         taille_ecran)
+        # Les photos ne sont pas forcement dans le dossier d'origine : elles ont
+        # pu etre rangees ailleurs lors d'une session precedente. On les
+        # localise donc des maintenant. Sans cela, le chargement anticipe lisait
+        # des chemins perimes, echouait, et chaque photo deplacee devait ensuite
+        # etre relue au moment de l'afficher, avec l'attente que cela suppose.
+        chemins = [self._localiser(nom)[1] or os.path.join(dossier, nom)
+                   for nom in self.photos]
+        self.chargeur = ChargeurAnticipe(chemins, taille_ecran)
         self.ecritures = EcrituresEnArrierePlan()
         self.attente = None          # nouvel essai programme si la photo n'est pas chargee
         self.attente_visages = None  # idem pour la detection des visages
         self.visages_recus = False   # les visages de la photo affichee sont-ils connus ?
+
+        # Redimensionnement de la fenetre : voir _zone_d_affichage_changee.
+        self.attente_apercus = None
+        self.derniere_taille_affichage = None
+        # Passe a True des le debut de la fermeture. La fermeture laisse
+        # Tkinter traiter ses evenements en attente (update_idletasks), ce qui
+        # peut encore signaler un changement de taille : sans ce temoin, on
+        # programmerait alors un appel sur une fenetre sur le point d'etre
+        # detruite.
+        self.en_fermeture = False
 
         # Detection des visages : lancee seulement en mode barrer, ou elle
         # sert. Le modele est charge une fois, la premiere fois qu'on l'active.
@@ -122,41 +146,94 @@ class FenetreRangement:
         barre = tk.Frame(self.fenetre, bg=COULEUR_BARRE)
         barre.pack(side="bottom", fill="x")
 
-        self.visionneuse = Visionneuse(self.fenetre)
+        # Un filet d'un pixel detache la barre de la photo. Sans lui, une photo
+        # sombre se confond avec la barre et les textes semblent flotter sur
+        # l'image.
+        tk.Frame(barre, bg=COULEUR_SEPARATEUR, height=1).pack(side="top", fill="x")
+
+        self.visionneuse = Visionneuse(self.fenetre,
+                                       au_changement_du_cadre=self._mettre_a_jour_barre)
         self.visionneuse.canvas.pack(side="top", fill="both", expand=True)
         # Les apercus sont prepares exactement a la taille de la zone
         # d'affichage : une photo s'y affiche alors sans etre redimensionnee.
         self.visionneuse.canvas.bind("<Configure>", self._zone_d_affichage_changee, add="+")
 
         ligne = tk.Frame(barre, bg=COULEUR_BARRE)
-        ligne.pack(side="top", fill="x", pady=(6, 0))
+        ligne.pack(side="top", fill="x", padx=14, pady=(10, 0))
         self.etiquette_mode = tk.Label(ligne, text="", bg=COULEUR_BARRE,
-                                       font=police(11, gras=True), padx=10)
+                                       font=police(10, gras=True))
         self.etiquette_mode.pack(side="right")
         self.etiquette_avancement = tk.Label(ligne, text="", bg=COULEUR_BARRE,
                                              fg=COULEUR_TEXTE, font=police(11, gras=True),
-                                             anchor="w", padx=10)
+                                             anchor="w")
         self.etiquette_avancement.pack(side="left")
         self.etiquette_retouches = tk.Label(ligne, text="", bg=COULEUR_BARRE,
-                                            fg=COULEUR_ATTENTION, font=police(11),
+                                            fg=COULEUR_ATTENTION, font=police(10),
                                             anchor="w")
         self.etiquette_retouches.pack(side="left")
 
         touches = ""
         if self.touches_de_tri:
-            touches = "  |  ".join("%s = %s" % (dossier["touche"], dossier["nom"])
-                                   for dossier in self.suivi.dossiers_tri) + "  |  "
-        self.rappel = (touches + "Entree = enregistrer et suivante  |  Espace ou → = suivante  |  "
-                       "← = precedente  |  Retour arriere = annuler  |  R = pivoter  |  "
-                       "C = rogner  |  Tab = mode barrer  |  Echap = quitter")
+            touches = "   ".join("[%s] %s" % (dossier["touche"], dossier["nom"])
+                                 for dossier in self.suivi.dossiers_tri) + "\n"
+        # Les touches de rangement sont mises sur leur propre ligne : ce sont
+        # celles que l'on cherche des yeux a chaque photo, et elles se perdaient
+        # au milieu d'une seule longue ligne de rappels.
+        self.rappel = (touches
+                       + "[Entree] enregistrer et suivante   [Espace] [→] suivante   "
+                         "[←] precedente   [Retour arriere] annuler   [R] pivoter   "
+                         "[C] rogner   [Tab] mode barrer   [Echap] quitter")
         self.etiquette_rappel = tk.Label(barre, text="", bg=COULEUR_BARRE,
                                          fg=COULEUR_RAPPEL, font=police(9),
-                                         anchor="w", justify="left", padx=10)
-        self.etiquette_rappel.pack(side="top", fill="x", pady=(0, 6))
+                                         anchor="w", justify="left")
+        self.etiquette_rappel.pack(side="top", fill="x", padx=14, pady=(6, 10))
 
     def _zone_d_affichage_changee(self, evenement):
-        if evenement.width >= 10 and evenement.height >= 10:
-            self.chargeur.changer_taille_apercu((evenement.width, evenement.height))
+        """La zone d'affichage a change de taille : les apercus seront refaits.
+
+        Pas tout de suite, toutefois. Tkinter envoie un evenement par pixel
+        parcouru pendant qu'on redimensionne la fenetre a la souris, et chacun
+        aurait condamne les apercus de toutes les photos en memoire : le fil
+        d'arriere-plan passait son temps a refaire des apercus aussitot
+        perimes. On attend donc que la fenetre ait cesse de bouger.
+        """
+        if evenement.width < 10 or evenement.height < 10 or self.en_fermeture:
+            return
+        self.derniere_taille_affichage = (evenement.width, evenement.height)
+        if self.attente_apercus is not None:
+            self.fenetre.after_cancel(self.attente_apercus)
+        self.attente_apercus = self.fenetre.after(DELAI_APRES_REDIMENSIONNEMENT,
+                                                  self._refaire_les_apercus)
+
+    def _refaire_les_apercus(self):
+        """Demande les apercus a la nouvelle taille, puis reprend celui de la photo affichee."""
+        self.attente_apercus = None
+        if self.derniere_taille_affichage is None:
+            return
+        self.chargeur.changer_taille_apercu(self.derniere_taille_affichage)
+        self._reprendre_l_apercu_courant()
+
+    def _reprendre_l_apercu_courant(self):
+        """Donne a la visionneuse l'apercu refait, des qu'il est pret.
+
+        Sans cela, la photo affichee garderait son apercu a l'ancienne taille,
+        que la visionneuse doit alors redimensionner a chaque dessin : elle
+        apparaissait moins nette que les photos suivantes, et pour toujours.
+
+        On ne passe pas par `montrer`, qui repart de zero : cela abandonnerait
+        la rotation en attente, le zoom et le cadre de rognage en cours, juste
+        parce que l'utilisateur a redimensionne sa fenetre.
+        """
+        self.attente_apercus = None
+        if self.visionneuse.image is None or self.position >= len(self.photos):
+            return
+        if not self.chargeur.est_prete(self.position):
+            self.attente_apercus = self.fenetre.after(DELAI_ATTENTE_CHARGEMENT,
+                                                      self._reprendre_l_apercu_courant)
+            return
+        _, apercu = self.chargeur.photo(self.position)
+        if apercu is not None:
+            self.visionneuse.remplacer_apercu(apercu)
 
     def _mettre_a_jour_rappel(self):
         if self.visionneuse.en_rognage:
@@ -169,7 +246,9 @@ class FenetreRangement:
 
     def _mettre_a_jour_barre(self):
         """Pastille du mode barrer, et retouches en attente d'enregistrement."""
-        if self.suivi.mode_barrer:
+        if self.visionneuse.en_rognage:
+            self.etiquette_mode.config(text="●  ROGNAGE  (C)", fg=COULEUR_MODE_ACTIF)
+        elif self.suivi.mode_barrer:
             texte = "●  MODE BARRER  (Tab)"
             if self.visionneuse.image is not None:
                 if self.visages_recus:
@@ -179,6 +258,18 @@ class FenetreRangement:
             self.etiquette_mode.config(text=texte, fg=COULEUR_MODE_ACTIF)
         else:
             self.etiquette_mode.config(text="Mode barrer : non  (Tab)", fg=COULEUR_RAPPEL)
+
+        # Pendant le rognage, la taille du cadre remplace la liste des
+        # retouches : c'est la seule chose utile a savoir a ce moment-la, et on
+        # la voit changer pendant qu'on tire les bords.
+        if self.visionneuse.en_rognage:
+            taille = self.visionneuse.taille_du_cadre()
+            if taille is None:
+                texte = "   -   photo entiere : tirez un bord pour la reduire"
+            else:
+                texte = "   -   cadre : %d x %d pixels (Entree)" % taille
+            self.etiquette_retouches.config(text=texte)
+            return
 
         morceaux = []
         if self.visionneuse.image is not None and self.visionneuse.rotation:
@@ -257,6 +348,10 @@ class FenetreRangement:
         texte = "Photo %d sur %d   -   %s" % (self.position + 1, len(self.photos), nom_fichier)
         if chemin is not None and dossier_actuel != self.dossier_origine:
             texte += "   -   actuellement dans « %s »" % (dossier_actuel or "dossier source")
+        if not est_modifiable(nom_fichier):
+            # Dit des maintenant que cette photo ne se retouche pas, plutot que
+            # de le decouvrir apres avoir pose des bandeaux pour rien.
+            texte += "   -   format non modifiable : tri seulement"
         self.etiquette_avancement.config(text=texte)
         self._mettre_a_jour_rappel()
 
@@ -323,6 +418,13 @@ class FenetreRangement:
             self.fenetre.after_cancel(self.attente_visages)
             self.attente_visages = None
 
+    def _annuler_attente_apercus(self):
+        """A appeler avant de fermer : sans cela, Tkinter rappellerait une
+        methode de cette fenetre alors qu'elle n'existe plus."""
+        if self.attente_apercus is not None:
+            self.fenetre.after_cancel(self.attente_apercus)
+            self.attente_apercus = None
+
     def _afficher_fin(self):
         self.etiquette_avancement.config(text="Toutes les photos ont ete parcourues")
         self.visionneuse.afficher_texte(
@@ -362,6 +464,11 @@ class FenetreRangement:
                 self.detecteur = DetecteurVisages()
             self.detection = DetectionAnticipee(self.detecteur, self.chargeur,
                                                 len(self.photos))
+            # Les visages de la photo affichee restent a detecter : sans cette
+            # remise a zero, desactiver puis reactiver le mode barrer faisait
+            # annoncer « 0 visage(s) » au lieu de « detection... », les visages
+            # ayant ete oublies mais le temoin etant reste vrai.
+            self.visages_recus = False
         except Exception as erreur:
             messagebox.showerror("Mode barrer indisponible",
                                  "La detection des visages n'a pas pu demarrer :\n%s"
@@ -410,9 +517,11 @@ class FenetreRangement:
             self.basculer_barrage()
         elif touche in ("Return", "KP_Enter"):
             self.valider()
-        elif touche in ("space", "Right"):
+        # Les touches du pave numerique portent un autre nom quand le verrouillage
+        # numerique est desactive : « KP_Right » au lieu de « Right ».
+        elif touche in ("space", "Right", "KP_Right"):
             self.suivante()
-        elif touche == "Left":
+        elif touche in ("Left", "KP_Left"):
             self.precedente()
         elif touche == "BackSpace":
             self.annuler()
@@ -476,6 +585,11 @@ class FenetreRangement:
         nom_fichier = self.photos[self.position]
         dossier_actuel, chemin = self._localiser(nom_fichier)
         if chemin is not None and self._retouches_en_attente():
+            if not self._verifier_que_la_photo_est_modifiable():
+                # Format que l'on ne sait pas reecrire sans perte : les
+                # retouches sont abandonnees, la photo n'est pas touchee.
+                self.suivante()
+                return
             sauvegarde, bandeaux, rotation = self._preparer_retouches(chemin)
             self.ecritures.ajouter(chemin, enregistrer_retouches, chemin, bandeaux, rotation)
             self.etat["historique"].append({
@@ -566,7 +680,10 @@ class FenetreRangement:
 
         sauvegarde = None
         retouches = None
-        if self._retouches_en_attente():
+        # Le rangement d'une photo au format non modifiable se fait quand meme :
+        # la deplacer ne l'altere pas. Seules ses retouches sont abandonnees,
+        # apres avoir prevenu.
+        if self._retouches_en_attente() and self._verifier_que_la_photo_est_modifiable():
             sauvegarde, bandeaux, rotation = self._preparer_retouches(chemin)
             retouches = (bandeaux, rotation)
 
@@ -621,26 +738,59 @@ class FenetreRangement:
     # ------------------------------------------------------------------
 
     def commencer_rognage(self):
-        if self.visionneuse.image is None:
+        """Entre en mode rognage : le cadre part des quatre bords de la photo."""
+        if self.visionneuse.image is None or self.position >= len(self.photos):
+            return
+        if not self._verifier_que_la_photo_est_modifiable():
             return
         self.visionneuse.commencer_rognage()
         self._mettre_a_jour_rappel()
+        self._mettre_a_jour_barre()
 
     def abandonner_rognage(self):
         self.visionneuse.arreter_rognage()
         self._mettre_a_jour_rappel()
+        self._mettre_a_jour_barre()
+
+    def _verifier_que_la_photo_est_modifiable(self):
+        """Refuse de retoucher un format que l'on ne sait pas reecrire sans perte.
+
+        Un BMP, un GIF ou un TIFF se trie sans risque, mais le reenregistrer le
+        degraderait (CLAUDE.md, section 8). Mieux vaut le dire que d'abimer la
+        photo en silence.
+        """
+        nom_fichier = self.photos[self.position]
+        if est_modifiable(nom_fichier):
+            return True
+        messagebox.showwarning(
+            "Format non modifiable",
+            "La photo « %s » peut etre triee, mais pas modifiee : son format ne "
+            "peut pas etre reenregistre sans perte de qualite.\n\n"
+            "Seuls les formats JPEG, PNG, HEIC et WEBP sont rognables et "
+            "censurables." % nom_fichier,
+            parent=self.fenetre)
+        self.fenetre.focus_force()
+        return False
 
     def rogner(self):
-        """Rogne la photo affichee selon le cadre trace, et l'enregistre sur place.
+        """Rogne la photo affichee selon le cadre, et l'enregistre sur place.
 
         La photo rognee est montree aussitot ; le fichier, lui, est reenregistre
         en arriere-plan (voir ecritures.py), ce qui evite de figer la fenetre
         pendant l'encodage. La rotation et les bandeaux en attente restent en
         attente : ils suivent simplement le nouveau cadrage.
         """
+        if self.position >= len(self.photos):
+            self.abandonner_rognage()
+            return
+
         cadre = self.visionneuse.cadre_de_rognage()
         if cadre is None:
-            return      # aucun cadre trace : on reste en mode rognage
+            # Le cadre couvre encore toute la photo : il n'y a rien a rogner. On
+            # sort simplement du mode, sans rien reecrire, plutot que de rester
+            # bloque dans un mode dont rien n'expliquerait qu'on ne sort pas.
+            self.abandonner_rognage()
+            return
 
         nom_fichier = self.photos[self.position]
         dossier_actuel, chemin = self._localiser(nom_fichier)
@@ -760,7 +910,9 @@ class FenetreRangement:
         Les retouches provisoires de la photo affichee sont abandonnees, comme
         lorsqu'on passe a une autre photo.
         """
+        self.en_fermeture = True
         self._annuler_attente()
+        self._annuler_attente_apercus()
         self.fenetre.after_cancel(self.surveillance)
         self.visionneuse.arreter()
 

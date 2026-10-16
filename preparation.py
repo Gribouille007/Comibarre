@@ -19,7 +19,7 @@ from PIL import ExifTags, Image
 
 # Importer `images` enregistre aussi le format HEIC aupres de Pillow, ce qui
 # permet de lire la date de prise de vue des photos d'iPhone.
-from images import EXTENSIONS_IMAGE, est_une_image
+from images import est_une_image
 
 # Fichiers bruts des appareils photo reflex et hybrides. Ils ne sont jamais
 # modifies : on se contente de les ranger a part.
@@ -134,6 +134,24 @@ def fichiers_a_la_racine(dossier_source):
     return noms
 
 
+def est_pris_en_charge(nom_fichier):
+    """Le fichier fait-il partie de ce que la preparation traite ?
+
+    Seules les photos, les fichiers RAW et les videos sont pris en charge. Tout
+    autre fichier pose a la racine du dossier source (un texte, un PDF, un
+    fichier de l'appareil) est laisse strictement intact : il n'est ni renomme,
+    ni deplace, ni compte dans la numerotation.
+
+    Auparavant, le renommage prenait tous les fichiers sans distinction : un
+    « notes.txt » devenait « 7.txt », alors que le code affirmait quelques
+    lignes plus loin le laisser ou il etait, sans y toucher.
+    """
+    extension = os.path.splitext(nom_fichier)[1].lower()
+    return (est_une_image(nom_fichier)
+            or extension in EXTENSIONS_RAW
+            or extension in EXTENSIONS_VIDEO)
+
+
 def creer_dossiers(suivi, avec_raw, avec_video):
     """Cree l'arborescence de rangement (section 7.1).
 
@@ -202,10 +220,9 @@ def mettre_a_ecart(suivi, noms):
         elif extension in EXTENSIONS_VIDEO:
             destination = os.path.join(suivi.dossier_evenement, NOM_DOSSIER_VIDEOS)
         else:
-            if est_une_image(nom):
-                restants.append(nom)
-            # Un fichier qui n'est ni une image, ni un RAW, ni une video (un
-            # fichier texte par exemple) est laisse ou il est, sans y toucher.
+            # Ne restent ici que des images : les fichiers d'un autre genre ont
+            # ete ecartes avant le renommage (voir est_pris_en_charge).
+            restants.append(nom)
             continue
 
         os.makedirs(destination, exist_ok=True)
@@ -233,7 +250,8 @@ def preparer(suivi):
     Renvoie un petit compte rendu, affiche ensuite a l'utilisateur.
     """
     dossier_source = suivi.dossier_source
-    noms = fichiers_a_la_racine(dossier_source)
+    tous_les_fichiers = fichiers_a_la_racine(dossier_source)
+    noms = [nom for nom in tous_les_fichiers if est_pris_en_charge(nom)]
 
     extensions = {os.path.splitext(nom)[1].lower() for nom in noms}
     avec_raw = bool(extensions & EXTENSIONS_RAW)
@@ -256,8 +274,5 @@ def preparer(suivi):
                    if os.path.splitext(n)[1].lower() in EXTENSIONS_RAW),
         "videos": sum(1 for n in nouveaux_noms
                       if os.path.splitext(n)[1].lower() in EXTENSIONS_VIDEO),
-        "ignores": sum(1 for n in nouveaux_noms
-                       if os.path.splitext(n)[1].lower() not in EXTENSIONS_RAW
-                       and os.path.splitext(n)[1].lower() not in EXTENSIONS_VIDEO
-                       and os.path.splitext(n)[1].lower() not in EXTENSIONS_IMAGE),
+        "ignores": len(tous_les_fichiers) - len(noms),
     }

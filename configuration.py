@@ -12,8 +12,8 @@ import os
 import tkinter as tk
 from tkinter import ttk
 
+import theme
 from dossiers import choisir_dossier, nom_de_dossier_valide
-from polices import police
 
 # Valeurs proposees par defaut, que l'utilisateur peut modifier librement.
 DOSSIERS_PAR_DEFAUT = [
@@ -34,9 +34,11 @@ class EcranConfiguration:
     def __init__(self, racine):
         self.resultat = None
 
+        self.racine = racine
         self.fenetre = tk.Toplevel(racine)
         self.fenetre.title("Nouvel evenement - configuration")
         self.fenetre.resizable(False, False)
+        theme.habiller(self.fenetre)
 
         self.variable_dossier = tk.StringVar()
         self.variable_nom = tk.StringVar()
@@ -45,18 +47,20 @@ class EcranConfiguration:
 
         self._construire()
         self.fenetre.protocol("WM_DELETE_WINDOW", self._annuler)
+        self.fenetre.bind("<Escape>", lambda evenement: self._annuler())
+        theme.centrer(self.fenetre, racine)
 
     # ------------------------------------------------------------------
     # Construction de l'interface
     # ------------------------------------------------------------------
 
     def _construire(self):
-        cadre = ttk.Frame(self.fenetre, padding=16)
+        cadre = ttk.Frame(self.fenetre, padding=theme.MARGE)
         cadre.grid(row=0, column=0, sticky="nsew")
 
         ttk.Label(cadre, text="Configuration d'un nouvel evenement",
-                  font=police(12, gras=True)).grid(row=0, column=0, columnspan=3,
-                                                      sticky="w", pady=(0, 12))
+                  style="Titre.TLabel").grid(row=0, column=0, columnspan=3,
+                                             sticky="w", pady=(0, 16))
 
         # -- dossier source --
         ttk.Label(cadre, text="Dossier source :").grid(row=1, column=0, sticky="w")
@@ -99,17 +103,18 @@ class EcranConfiguration:
                 lambda *_, variable=variable_touche: self._limiter_a_un_caractere(variable))
 
         # -- message d'erreur --
-        self.etiquette_erreur = ttk.Label(cadre, text="", foreground="#b00020",
+        self.etiquette_erreur = ttk.Label(cadre, text="", style="Alerte.TLabel",
                                           wraplength=460, justify="left")
         self.etiquette_erreur.grid(row=10, column=0, columnspan=3, sticky="w",
                                    pady=(14, 0))
 
         # -- boutons --
         boutons = ttk.Frame(cadre)
-        boutons.grid(row=11, column=0, columnspan=3, sticky="e", pady=(16, 0))
-        ttk.Button(boutons, text="Annuler", command=self._annuler).grid(row=0, column=0,
-                                                                       padx=(0, 8))
-        ttk.Button(boutons, text="Continuer", command=self._valider).grid(row=0, column=1)
+        boutons.grid(row=11, column=0, columnspan=3, sticky="e", pady=(18, 0))
+        ttk.Button(boutons, text="Annuler", width=14,
+                   command=self._annuler).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(boutons, text="Continuer", width=14, style="Accent.TButton",
+                   command=self._valider).grid(row=0, column=1)
 
     @staticmethod
     def _limiter_a_un_caractere(variable):

@@ -34,6 +34,13 @@ et d'une session à l'autre (`mode_barrer` dans le suivi). Tri et revue ne
 diffèrent que par le dossier d'origine ; une copie faite depuis le menu se
 revoit aussi, mais sans touches de tri (ses photos n'en sortent pas).
 
+**Le rognage se fait en réduisant les bords** (décision de l'utilisateur,
+16 octobre 2026), comme sur un téléphone : à l'ouverture, le cadre épouse la
+photo entière, et l'on tire l'un de ses quatre bords, l'un de ses quatre coins,
+ou le cadre entier. Il fallait auparavant tracer un rectangle à la souris, ce
+qui obligeait à tout recommencer dès qu'on le plaçait mal, et ne permettait pas
+de ne retirer qu'une bande d'un seul côté.
+
 Volume visé : jusqu'à environ **3 000 photos** par session, sans perte de
 fluidité. [1]
 
@@ -106,6 +113,13 @@ OpenCV suffit là où mediapipe imposait 17 paquets supplémentaires.
   métaprogrammation, pas de motif de conception introduit « au cas où ».
 - Noms de variables et de fonctions explicites, en français ou en anglais mais
   de façon cohérente dans tout le projet.
+- **Pas d'accents dans les fichiers `.py`**, y compris dans les textes affichés
+  (`« Preparation terminee »`) ; les guillemets `« »` et le degré `°` sont en
+  revanche admis. Convention suivie par tout le projet depuis l'origine.
+- **Toutes les couleurs sont dans `theme.py`**, et nulle part ailleurs. Une
+  couleur écrite en dur dans un module d'interface est une erreur : c'est ce
+  qui avait fait diverger la fenêtre de tri, sombre, des écrans d'accueil et de
+  configuration, restés au gris clair de Tkinter.
 - **Commenter obligatoirement les passages non évidents** [11.4] :
   - le rattachement d'un clic au bon visage,
   - le calcul de l'inclinaison et de la forme des bandeaux,
@@ -216,27 +230,41 @@ implémentés :
   position est notée dans le suivi). Au tri et en revue, une photo déjà rangée
   est montrée depuis le dossier où elle se trouve ; une touche de tri la déplace
   de là vers le nouveau dossier.
-- **Rognage** : rien n'est écrit avant la validation (Entrée). Le cadre est
-  tracé sur la photo remise dans le bon sens (EXIF) puis éventuellement pivotée ;
-  le rognage est enregistré dans le sens d'origine, et la rotation reste en
-  attente, comme les bandeaux, qui suivent le nouveau cadrage. Mêmes garanties
-  qu'à la censure : copie de sauvegarde, réenregistrement dans le format
-  d'origine, annulation par Retour arrière.
+- **Rognage** : rien n'est écrit avant la validation (Entrée). Le cadre **part
+  des quatre bords de la photo** et se réduit en tirant un bord, un coin ou le
+  cadre entier ; tant qu'il n'a pas bougé, Entrée ne réenregistre rien et sort
+  simplement du mode. Il s'applique à la photo remise dans le bon sens (EXIF)
+  puis éventuellement pivotée ; le rognage est enregistré dans le sens
+  d'origine, et la rotation reste en attente, comme les bandeaux, qui suivent le
+  nouveau cadrage. Mêmes garanties qu'à la censure : copie de sauvegarde,
+  réenregistrement dans le format d'origine, annulation par Retour arrière.
+  Pendant le rognage, **seules Entrée, Échap et C agissent** ; la photo est
+  montrée entière, avec une marge tout autour pour que ses bords restent
+  saisissables à la souris.
 - **Mode revue** : ne revoit et ne déplace que vers les quatre dossiers de tri ;
   la touche du dossier revu laisse la photo en place. **Aucun déplacement
   n'écrase un fichier** portant déjà le même nom.
 - **Bords du bandeau lissés** (suréchantillonnage ×4 puis réduction) : un bandeau
   incliné ne doit pas présenter de marches d'escalier. L'intérieur reste
   entièrement noir, et le rendu à l'écran est identique à celui du fichier.
-- **Renommage** : numérotation continue `1, 2, 3…` **sans zéros devant**,
-  extension d'origine conservée, dans l'**ordre chronologique strict** :
-  `1` = la photo la plus ancienne par date et heure, `n` = la plus récente, et
-  aucun autre ordre. La date retenue est celle de **prise de vue (EXIF
-  `DateTimeOriginal`)** ; à défaut seulement, la plus ancienne des dates du
-  fichier (sous Windows, la « date de création » est celle de la copie sur le
-  disque et ne reflète pas la prise de vue). Égalité : nom d'origine. Procéder
-  **en deux passes** (noms temporaires puis noms définitifs) pour éviter les
-  collisions. [7.2]
+- **Renommage** : numérotation `1, 2, 3…` **sans zéros devant**, extension
+  d'origine conservée, dans l'**ordre chronologique strict** : `1` = le fichier
+  le plus ancien par date et heure, `n` = le plus récent, et aucun autre ordre.
+  La date retenue est celle de **prise de vue (EXIF `DateTimeOriginal`)** ; à
+  défaut seulement, la plus ancienne des dates du fichier (sous Windows, la
+  « date de création » est celle de la copie sur le disque et ne reflète pas la
+  prise de vue). Égalité : nom d'origine. Procéder **en deux passes** (noms
+  temporaires puis noms définitifs) pour éviter les collisions. [7.2]
+
+  **La numérotation porte sur l'ensemble photos + RAW + vidéos**, et les photos
+  à trier gardent donc des trous une fois les RAW et les vidéos mis à l'écart
+  (décision de l'utilisateur, 16 octobre 2026, à la place de la numérotation
+  continue initialement prévue). C'est voulu : le numéro dit **quand** le
+  fichier a été pris, et `2.cr2` se situe ainsi entre `1.jpg` et `3.jpg`, ce
+  qui permet de retrouver à quel moment un RAW a été déclenché.
+
+  **Un fichier qui n'est ni une photo, ni un RAW, ni une vidéo n'est jamais
+  touché** : il n'est ni renommé, ni déplacé, ni compté dans la numérotation.
 - **Dossiers `RAW/` et `Videos/` créés uniquement si de tels fichiers
   existent.** [7.1]
 - **La préparation automatique ne se rejoue jamais** à la reprise d'un événement
@@ -325,10 +353,18 @@ Mise en œuvre :
 
 | Type | Traitement |
 |---|---|
-| JPEG, PNG | Triés **et** censurés. |
+| JPEG, PNG, WEBP | Triés **et** censurés. |
 | HEIC | Traités normalement : lus et réenregistrés dans leur format. |
+| BMP, GIF, TIFF | **Triés seulement.** Rognage et bandeaux refusés avec un message. |
 | RAW (`.cr2`, `.nef`, `.arw`, `.dng`) | Mis de côté dans `RAW/`, jamais modifiés. |
 | Vidéo (`.mp4`, `.mov`, `.avi`, `.mkv`) | Mis de côté dans `Videos/`, jamais traités. |
+
+**Pourquoi BMP, GIF et TIFF sont triés mais pas modifiés** (décision de
+l'utilisateur, 16 octobre 2026) : les trier ne touche pas au fichier, donc ne
+risque rien ; les réenregistrer les dégraderait, un GIF ne retenant que
+256 couleurs et ni l'un ni l'autre ne conservant ses données EXIF à la
+réécriture. Plutôt que d'abîmer la photo en silence, le logiciel refuse de la
+modifier et le dit. La liste fait foi dans `images.EXTENSIONS_MODIFIABLES`.
 
 ---
 
@@ -341,4 +377,5 @@ Mise en œuvre :
    **toutes les commandes clavier de chaque étape**.
 5. Des lanceurs pour les trois systèmes, et une installation qui se fait seule.
 6. Des tests exécutables : `verifier_installation.py` pour l'installation,
-   `tester_bandeau.py` pour la géométrie du bandeau.
+   `tester_bandeau.py` pour la géométrie du bandeau, `tester_rognage.py` pour
+   celle du cadre de rognage.

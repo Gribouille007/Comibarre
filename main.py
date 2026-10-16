@@ -16,10 +16,11 @@ import os
 import sys
 import traceback
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, ttk
 
 import dossiers
 import preparation
+import theme
 from configuration import demander_configuration
 from polices import police
 from revue import lancer_revue
@@ -38,21 +39,24 @@ class EcranDemarrage:
         self.fenetre.title("Tri et censure de photos")
         self.fenetre.resizable(False, False)
         self.fenetre.protocol("WM_DELETE_WINDOW", self.fenetre.destroy)
+        theme.habiller(self.fenetre)
 
-        cadre = ttk.Frame(self.fenetre, padding=24)
+        cadre = ttk.Frame(self.fenetre, padding=theme.MARGE)
         cadre.grid(row=0, column=0)
 
         ttk.Label(cadre, text="Tri et censure de photos",
-                  font=police(14, gras=True)).grid(row=0, column=0, pady=(0, 4))
+                  style="Titre.TLabel").grid(row=0, column=0, pady=(0, 4))
         ttk.Label(cadre, text="Que voulez-vous faire ?",
-                  foreground="#555555").grid(row=1, column=0, pady=(0, 16))
+                  style="Doux.TLabel").grid(row=1, column=0, pady=(0, 18))
 
         ttk.Button(cadre, text="Demarrer un nouvel evenement", width=34,
+                   style="Accent.TButton",
                    command=self._nouveau).grid(row=2, column=0, pady=4)
         ttk.Button(cadre, text="Reprendre un evenement existant", width=34,
                    command=self._reprendre).grid(row=3, column=0, pady=4)
         ttk.Button(cadre, text="Quitter", width=34,
-                   command=self.fenetre.destroy).grid(row=4, column=0, pady=(16, 0))
+                   command=self.fenetre.destroy).grid(row=4, column=0, pady=(18, 0))
+        theme.centrer(self.fenetre, racine)
 
     def _nouveau(self):
         configuration = demander_configuration(self.racine)
@@ -93,9 +97,12 @@ class EcranDemarrage:
         attente = tk.Toplevel(self.fenetre)
         attente.title("Preparation")
         attente.resizable(False, False)
+        attente.transient(self.fenetre)
+        theme.habiller(attente)
         ttk.Label(attente, text="Preparation en cours...\n"
                                 "Creation des dossiers, renommage des photos.",
-                  padding=24, justify="center").grid(row=0, column=0)
+                  padding=theme.MARGE, justify="center").grid(row=0, column=0)
+        theme.centrer(attente, self.fenetre)
         attente.update()
 
         try:
@@ -145,28 +152,34 @@ class MenuPrincipal:
         self.fenetre.title("Menu - %s" % suivi.nom_evenement)
         self.fenetre.resizable(False, False)
         self.fenetre.protocol("WM_DELETE_WINDOW", self.quitter)
+        theme.habiller(self.fenetre)
 
-        cadre = ttk.Frame(self.fenetre, padding=24)
+        cadre = ttk.Frame(self.fenetre, padding=theme.MARGE)
         cadre.grid(row=0, column=0)
 
         ttk.Label(cadre, text=suivi.nom_evenement,
-                  font=police(14, gras=True)).grid(row=0, column=0, sticky="w")
-        self.etiquette_etat = ttk.Label(cadre, text="", foreground="#555555",
+                  style="Titre.TLabel").grid(row=0, column=0, sticky="w")
+        self.etiquette_etat = ttk.Label(cadre, text="", style="Doux.TLabel",
                                         justify="left")
-        self.etiquette_etat.grid(row=1, column=0, sticky="w", pady=(4, 16))
+        self.etiquette_etat.grid(row=1, column=0, sticky="w", pady=(6, 4))
+
+        ttk.Separator(cadre, orient="horizontal").grid(row=2, column=0, sticky="we",
+                                                       pady=(12, 16))
 
         ttk.Button(cadre, text="Trier les photos du dossier source", width=42,
-                   command=self._trier).grid(row=2, column=0, pady=4)
+                   style="Accent.TButton",
+                   command=self._trier).grid(row=3, column=0, pady=4)
         ttk.Button(cadre, text="Revoir un dossier  (reclasser, barrer les yeux)", width=42,
-                   command=self._revoir).grid(row=3, column=0, pady=4)
+                   command=self._revoir).grid(row=4, column=0, pady=4)
         ttk.Label(cadre, text="Touche Tab dans la fenetre : mode barrer les yeux",
-                  foreground="#555555").grid(row=4, column=0, pady=(2, 0))
+                  style="Doux.TLabel").grid(row=5, column=0, pady=(4, 0))
         ttk.Button(cadre, text="Dupliquer un dossier", width=42,
-                   command=self._dupliquer).grid(row=5, column=0, pady=(12, 4))
+                   command=self._dupliquer).grid(row=6, column=0, pady=(14, 4))
         ttk.Button(cadre, text="Quitter", width=42,
-                   command=self.quitter).grid(row=6, column=0, pady=(16, 0))
+                   command=self.quitter).grid(row=7, column=0, pady=(18, 0))
 
         self._rafraichir()
+        theme.centrer(self.fenetre, racine)
 
     def _rafraichir(self):
         """Met a jour le resume de l'avancement affiche dans le menu."""
@@ -250,14 +263,14 @@ class MenuPrincipal:
         boite.title(titre)
         boite.resizable(False, False)
         boite.transient(self.fenetre)
-        boite.grab_set()
+        theme.habiller(boite)
 
         choix = {"dossier": None}
 
-        cadre = ttk.Frame(boite, padding=20)
+        cadre = ttk.Frame(boite, padding=theme.MARGE)
         cadre.grid(row=0, column=0)
         ttk.Label(cadre, text=question,
-                  font=police(10, gras=True)).grid(row=0, column=0, pady=(0, 12))
+                  font=police(11, gras=True)).grid(row=0, column=0, pady=(0, 14))
 
         def choisir(nom):
             choix["dossier"] = nom
@@ -272,8 +285,13 @@ class MenuPrincipal:
         # Le bouton d'annulation se place apres le dernier dossier : leur nombre
         # varie, car les copies s'ajoutent aux quatre dossiers de tri.
         ttk.Button(cadre, text="Annuler", width=34,
-                   command=boite.destroy).grid(row=1 + len(noms), column=0, pady=(14, 0))
+                   command=boite.destroy).grid(row=1 + len(noms), column=0, pady=(16, 0))
 
+        boite.bind("<Escape>", lambda evenement: boite.destroy())
+        # Le placement doit preceder la capture du clavier, sinon on voit la
+        # boite sauter sous les yeux de l'utilisateur.
+        theme.centrer(boite, self.fenetre)
+        boite.grab_set()
         self.racine.wait_window(boite)
         return choix["dossier"]
 
@@ -330,10 +348,10 @@ class MenuPrincipal:
         propose = dossiers.nom_de_copie_disponible(self.suivi.dossier_evenement,
                                                    nom_source)
         while True:
-            saisi = simpledialog.askstring(
-                "Nom de la copie",
+            saisi = theme.demander_texte(
+                self.fenetre, "Nom de la copie",
                 "Nom du nouveau dossier, cree a cote de « %s » :" % nom_source,
-                initialvalue=propose, parent=self.fenetre)
+                propose)
             if saisi is None:
                 return None
 
@@ -394,6 +412,9 @@ def main():
 
     racine = tk.Tk()
     racine.withdraw()
+    # L'apparence est reglee avant d'ouvrir la moindre fenetre, sans quoi la
+    # premiere s'afficherait en gris clair le temps d'un battement de cil.
+    theme.appliquer(racine)
     signaler_les_erreurs(racine)
 
     try:
