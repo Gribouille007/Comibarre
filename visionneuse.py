@@ -85,8 +85,8 @@ CURSEURS_ROGNAGE = {
 COULEUR_FOND = theme.NOIR_PHOTO
 COULEUR_TEXTE = theme.TEXTE
 COULEUR_ERREUR = theme.ALERTE
-COULEUR_CADRE = "#ffffff"
-COULEUR_GRILLE = "#8f8f8f"
+COULEUR_CADRE = theme.TRAIT_SUR_PHOTO
+COULEUR_GRILLE = theme.GRILLE_SUR_PHOTO
 
 
 class Visionneuse:
@@ -242,7 +242,7 @@ class Visionneuse:
         self.en_rognage = False
         self.cadre = None
         self._oublier_la_prise()
-        self.definir_curseur("")
+        self._remettre_le_pointeur()
         # Dessin complet, et non du seul cadre : la photo reprend toute la
         # place, l'espace laisse autour d'elle pendant le rognage disparaissant
         # avec lui (voir _facteur).
@@ -297,10 +297,20 @@ class Visionneuse:
             self.curseur = ""
 
     def arreter(self):
-        """Annule un dessin programme. A appeler avant de fermer la fenetre."""
+        """Annule un dessin programme et libere les images. A appeler avant de fermer."""
         if self.dessin_programme is not None:
             self.canvas.after_cancel(self.dessin_programme)
             self.dessin_programme = None
+        # Les images Tkinter sont liberees ici, sur le fil principal. Laissees
+        # a la fenetre fermee, elles seraient detruites plus tard par le
+        # ramasse-miettes de Python, depuis n'importe quel fil : voir le
+        # commentaire de FenetreRangement.__init__ sur gc.collect.
+        self.photo_tk = None
+        self.bandes_tk = []
+
+    def dimensions_affichees(self):
+        """Largeur et hauteur de la photo telle qu'elle est montree (apres la touche R)."""
+        return self._dimensions()
 
     def facteur_affichage(self):
         """Nombre de pixels d'ecran pour un pixel de la photo, zoom compris."""
@@ -397,11 +407,27 @@ class Visionneuse:
         self.en_rognage = False
         self.cadre = None
         self._oublier_la_prise()
+        # Un appui en cours visait la photo d'avant (une touche pressee bouton
+        # enfonce) : on l'oublie, sans quoi le relachement posait un bandeau
+        # sur la photo suivante, ou sur la photo qui venait d'etre rognee.
+        self.point_presse = None
+        self.clic_pour_l_outil = False
+        self.a_glisse = False
         # Le pointeur revient a la fleche ordinaire : sans cela, il gardait la
         # forme de la derniere prise du cadre (une fleche d'angle, par exemple)
         # apres un rognage valide, et restait ainsi tant que l'outil bandeaux
         # n'avait pas repris la main, ce qui n'arrive pas hors du mode barrer.
+        self._remettre_le_pointeur()
+
+    def _remettre_le_pointeur(self):
+        """Fleche ordinaire, et l'outil bandeaux oublie ce qu'il survolait.
+
+        Sans cet oubli, revenu au-dessus du meme bandeau, l'outil croyait
+        n'avoir rien a changer, et le pointeur restait une simple fleche.
+        """
         self.definir_curseur("")
+        if self.outil is not None:
+            self.outil.survol = None
 
     def _oublier_la_prise(self):
         """Oublie le bord ou le coin du cadre que la souris tenait."""
@@ -758,9 +784,11 @@ class Visionneuse:
 
         if self.en_rognage:
             self._ajuster_cadre(evenement)
-        elif self.clic_pour_l_outil:
+        elif self.clic_pour_l_outil and self.outil is not None:
+            # L'outil a pu etre retire pendant l'appui (Tab presse en tirant
+            # un bandeau) : sans cette garde, le logiciel s'arretait.
             self.outil.glissee(*self.point_d_origine(evenement.x, evenement.y))
-        else:
+        elif not self.clic_pour_l_outil:
             self._deplacer_vue(evenement)
 
     def _souris_relachee(self, evenement):
@@ -781,8 +809,20 @@ class Visionneuse:
             self._demander_dessin_du_cadre()
 
     def _double_clic(self, evenement):
-        if self.outil is not None and not self.en_rognage and self.image is not None:
-            self.outil.double_clic(*self.point_d_origine(evenement.x, evenement.y))
+        """Second appui d'un double-clic.
+
+        Tk n'appelle alors que cette liaison, et non celle de l'appui simple.
+        Quand l'outil n'en fait rien (une poignee reprise aussitot apres
+        l'avoir lachee, un bord du cadre de rognage saisi de nouveau), l'appui
+        est donc traite comme un appui ordinaire : sans cela, il ne saisissait
+        rien et la poignee ou le bord ne suivait plus la souris.
+        """
+        if self.image is None:
+            return
+        if self.outil is not None and not self.en_rognage:
+            if self.outil.double_clic(*self.point_d_origine(evenement.x, evenement.y)):
+                return
+        self._souris_pressee(evenement)
 
     def _souris_bougee(self, evenement):
         """Annonce ce que la souris survole, bouton relache.

@@ -90,11 +90,16 @@ class Bandeau:
         return cls(centre_x, centre_y, longueur, epaisseur, angle, manuel=False)
 
     @classmethod
-    def manuel_par_defaut(cls, x, y, largeur_photo):
-        """Construit un bandeau de taille standard la ou l'utilisateur a clique."""
+    def manuel_par_defaut(cls, x, y, largeur_photo, angle=0.0):
+        """Construit un bandeau de taille standard la ou l'utilisateur a clique.
+
+        `largeur_photo` est la largeur de la photo telle qu'elle est montree,
+        et `angle` l'inclinaison qui rend le bandeau horizontal a l'ecran
+        (voir censure.OutilBandeaux._clic_dans_le_vide).
+        """
         longueur = max(largeur_photo * LONGUEUR_MANUELLE_PAR_DEFAUT, 24)
         epaisseur = max(longueur * RAPPORT_EPAISSEUR_MANUELLE, EPAISSEUR_MINIMALE)
-        return cls(x, y, longueur, epaisseur, 0.0, manuel=True)
+        return cls(x, y, longueur, epaisseur, angle, manuel=True)
 
     # ------------------------------------------------------------------
     # Geometrie

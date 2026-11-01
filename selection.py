@@ -16,7 +16,9 @@ import math
 
 from PIL import Image, ImageDraw
 
-# Meme facteur de suréchantillonnage que pour les bandeaux : chaque pixel reel
+import theme
+
+# Meme facteur de surechantillonnage que pour les bandeaux : chaque pixel reel
 # est calcule a partir de 4 x 4 petits pixels, ce qui donne 16 nuances de bord.
 SURECHANTILLONNAGE = 4
 
@@ -28,12 +30,12 @@ EPAISSEUR_OMBRE = 4.2          # trait sombre sous le contour blanc
 TRAIT_POINTILLE = 4.0
 VIDE_POINTILLE = 4.0
 
-# Couleurs. Le contour est blanc, pose sur un trait sombre a peine visible :
-# c'est ce qui le rend lisible aussi bien sur un ciel clair que sur un costume
-# noir, sans avoir besoin de choisir une couleur voyante.
-BLANC = (255, 255, 255)
-NOIR = (0, 0, 0)
-ACCENT = (10, 132, 255)        # bleu, reserve a la poignee de rotation
+# Couleurs (voir theme.py). Le contour est blanc, pose sur un trait sombre a
+# peine visible : c'est ce qui le rend lisible aussi bien sur un ciel clair que
+# sur un costume noir, sans avoir besoin de choisir une couleur voyante.
+BLANC = theme.en_rvb(theme.TRAIT_SUR_PHOTO)
+NOIR = theme.en_rvb(theme.OMBRE_SUR_PHOTO)
+ACCENT = theme.en_rvb(theme.ACCENT)        # reserve a la poignee de rotation
 
 OPACITE_OMBRE = 80             # sur 255
 OPACITE_CONTOUR = 235

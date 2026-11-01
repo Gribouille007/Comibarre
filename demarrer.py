@@ -51,7 +51,37 @@ def deja_installe():
     if not os.path.isfile(python_du_venv()) or not os.path.isfile(TEMOIN):
         return False
     with open(TEMOIN, encoding="utf-8") as fichier:
-        return fichier.read().strip() == empreinte_des_bibliotheques()
+        if fichier.read().strip() != empreinte_des_bibliotheques():
+            return False
+    return environnement_fonctionne()
+
+
+def environnement_fonctionne():
+    """L'environnement isole demarre-t-il, avec ses bibliotheques ?
+
+    Ses fichiers peuvent etre la sans qu'il fonctionne : il s'appuie sur le
+    Python qui l'a cree, et une mise a jour ou une desinstallation de ce
+    Python le casse. Chaque lancement s'arretait alors sur « did not find
+    executable », sans rien proposer. On l'essaie donc pour de bon ; s'il ne
+    repond pas, il est refait (voir main).
+    """
+    try:
+        resultat = subprocess.run(
+            [python_du_venv(), "-c", "import tkinter, PIL, cv2, pillow_heif"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return resultat.returncode == 0
+
+
+def python_du_venv_demarre():
+    """Le Python de l'environnement isole demarre-t-il, meme sans bibliotheques ?"""
+    try:
+        return subprocess.run([python_du_venv(), "-c", "pass"],
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode == 0
+    except OSError:
+        return False
 
 
 def verifier_la_version_de_python():
@@ -153,7 +183,13 @@ def arreter(message):
 
 
 def attendre_avant_de_fermer():
-    """Garde la fenetre ouverte, quand le programme a ete lance par un double-clic."""
+    """Garde la fenetre ouverte, quand le programme a ete lance par un double-clic.
+
+    Lance par lancer.bat, qui fait deja une pause apres une erreur, on ne
+    demande rien : l'utilisateur devait sinon appuyer deux fois sur une touche.
+    """
+    if os.environ.get("LANCEUR_FAIT_UNE_PAUSE") == "1":
+        return
     if sys.stdin is not None and sys.stdin.isatty():
         try:
             input("\nAppuyez sur Entree pour fermer cette fenetre.")
@@ -169,7 +205,9 @@ def main():
         shutil.rmtree(DOSSIER_VENV, ignore_errors=True)
 
     if not deja_installe():
-        if not os.path.isfile(python_du_venv()):
+        # Un environnement casse (son Python a ete mis a jour ou desinstalle)
+        # est refait entierement : y reinstaller les bibliotheques echouerait.
+        if not os.path.isfile(python_du_venv()) or not python_du_venv_demarre():
             fabriquer_l_environnement()
         installer_les_bibliotheques()
         print("Installation terminee.\n")

@@ -50,6 +50,22 @@ class EcrituresEnArrierePlan:
                 while chemin in self.en_attente:
                     self.signal.wait()
 
+    def en_cours(self, chemin=None):
+        """Un enregistrement est-il en cours, pour ce fichier ou (chemin None) pour l'un d'eux ?
+
+        Repond tout de suite, sans attendre : la fenetre s'en sert pour
+        revenir voir un peu plus tard, plutot que de se figer pendant
+        l'encodage d'un HEIC, qui prend plusieurs secondes.
+        """
+        with self.signal:
+            if chemin is None:
+                return bool(self.en_attente)
+            return chemin in self.en_attente
+
+    def nombre_en_cours(self):
+        with self.signal:
+            return len(self.en_attente)
+
     def erreurs_a_signaler(self):
         """Renvoie les enregistrements rates depuis le dernier appel."""
         with self.signal:
@@ -90,11 +106,15 @@ def signaler_les_echecs(ecritures, chargeur, fenetre):
     La version modifiee gardee en memoire par le chargeur ne correspond alors
     plus au fichier : elle est oubliee, pour que la photo soit relue telle
     qu'elle est reellement sur le disque.
+
+    Renvoie les chemins des fichiers concernes.
     """
-    for chemin, message in ecritures.erreurs_a_signaler():
+    erreurs = ecritures.erreurs_a_signaler()
+    for chemin, message in erreurs:
         chargeur.oublier_fichier(chemin)
         messagebox.showerror(
             "Enregistrement impossible",
             "La photo « %s » n'a pas pu etre enregistree :\n%s\n\n"
             "Le fichier d'origine est reste intact." % (os.path.basename(chemin), message),
             parent=fenetre)
+    return [chemin for chemin, _ in erreurs]

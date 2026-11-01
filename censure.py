@@ -52,6 +52,10 @@ class OutilBandeaux:
         self.bandeaux_visages = {}   # index du visage -> Bandeau
         self.bandeaux_manuels = []
         self.bandeau_selectionne = None
+        # Les visages arrivent de la detection en arriere-plan, parfois une
+        # fraction de seconde apres la photo : voir recevoir_visages.
+        self.visages_connus = False
+        self.bandeaux_en_attente = []   # (x, y, bandeau manuel) poses d'ici la
 
         # Etat de la manipulation a la souris.
         self.action = None           # None, "poignee" ou "corps"
@@ -66,6 +70,8 @@ class OutilBandeaux:
     def vider(self):
         """Retire tous les bandeaux et oublie les visages (nouvelle photo)."""
         self.visages = []
+        self.visages_connus = False
+        self.bandeaux_en_attente = []
         self.bandeaux_visages = {}
         self.bandeaux_manuels = []
         self.bandeau_selectionne = None
@@ -79,29 +85,84 @@ class OutilBandeaux:
         """Tous les bandeaux poses sur la photo, detectes et manuels confondus."""
         return list(self.bandeaux_visages.values()) + self.bandeaux_manuels
 
+    def recevoir_visages(self, visages):
+        """Les visages de la photo sont connus : reprend les clics faits en les attendant.
+
+        La detection se fait en arriere-plan, et peut arriver une fraction de
+        seconde apres la photo (juste apres Tab ou une annulation). Un clic
+        fait entre-temps pose aussitot un bandeau manuel : la photo n'est
+        jamais sans bandeau, meme validee dans la foulee. Mais ce bandeau
+        restait horizontal, sans suivre la tete. Maintenant que les visages
+        sont la, il est remplace par celui du visage vise, s'il y en a un.
+        """
+        self.visages = visages
+        self.visages_connus = True
+        en_attente = self.bandeaux_en_attente
+        self.bandeaux_en_attente = []
+        for x, y, manuel in en_attente:
+            if not any(manuel is bandeau for bandeau in self.bandeaux_manuels):
+                continue        # retire entre-temps par un double-clic
+            index_visage = visage_le_plus_proche(self.visages, x, y)
+            if index_visage is None or index_visage in self.bandeaux_visages:
+                continue
+            visage = self.visages[index_visage]
+            nouveau = Bandeau.depuis_yeux(visage.oeil_droit, visage.oeil_gauche)
+            self.bandeaux_manuels = [bandeau for bandeau in self.bandeaux_manuels
+                                     if bandeau is not manuel]
+            self.bandeaux_visages[index_visage] = nouveau
+            if self.bandeau_selectionne is manuel:
+                self.bandeau_selectionne = nouveau
+        self.au_changement()
+        self._redessiner()
+
     def decaler(self, gauche, haut, largeur, hauteur):
         """Suit un rognage : la photo commence desormais au point (gauche, haut).
 
         Les bandeaux et les visages sont decales d'autant, pour rester sur les
         memes yeux. Un bandeau dont le centre tombe hors de la photo rognee est
         retire : il ne masquerait plus rien.
+
+        Un visage dont les yeux sont sortis du cadre a disparu de la photo :
+        il est oublie. Sans cela, il attirait encore les clics, et un clic pres
+        du nouveau bord posait son bandeau hors de la photo. Les visages
+        gardes changeant de numero, les bandeaux qui leur sont rattaches sont
+        renumerotes ; celui d'un visage disparu, s'il est reste dans le cadre,
+        devient un bandeau manuel.
         """
         for bandeau in self.bandeaux():
             bandeau.deplacer(-gauche, -haut)
-        self.bandeaux_manuels = [bandeau for bandeau in self.bandeaux_manuels
-                                 if _dans_le_cadre(bandeau, largeur, hauteur)]
-        self.bandeaux_visages = {index: bandeau
-                                 for index, bandeau in self.bandeaux_visages.items()
-                                 if _dans_le_cadre(bandeau, largeur, hauteur)}
+
+        visages_gardes = []
+        nouveau_numero = {}          # ancien numero du visage -> nouveau
+        for index, visage in enumerate(self.visages):
+            decale = Visage(visage.x - gauche, visage.y - haut,
+                            visage.largeur, visage.hauteur,
+                            (visage.oeil_droit[0] - gauche, visage.oeil_droit[1] - haut),
+                            (visage.oeil_gauche[0] - gauche, visage.oeil_gauche[1] - haut),
+                            visage.score)
+            milieu_x = (decale.oeil_droit[0] + decale.oeil_gauche[0]) / 2
+            milieu_y = (decale.oeil_droit[1] + decale.oeil_gauche[1]) / 2
+            if 0 <= milieu_x <= largeur and 0 <= milieu_y <= hauteur:
+                nouveau_numero[index] = len(visages_gardes)
+                visages_gardes.append(decale)
+        self.visages = visages_gardes
+
+        manuels = [bandeau for bandeau in self.bandeaux_manuels
+                   if _dans_le_cadre(bandeau, largeur, hauteur)]
+        bandeaux_visages = {}
+        for index, bandeau in self.bandeaux_visages.items():
+            if not _dans_le_cadre(bandeau, largeur, hauteur):
+                continue
+            if index in nouveau_numero:
+                bandeaux_visages[nouveau_numero[index]] = bandeau
+            else:
+                manuels.append(bandeau)
+        self.bandeaux_manuels = manuels
+        self.bandeaux_visages = bandeaux_visages
+        self.bandeaux_en_attente = [(x - gauche, y - haut, bandeau)
+                                    for x, y, bandeau in self.bandeaux_en_attente]
         if self.bandeau_selectionne not in self.bandeaux():
             self.bandeau_selectionne = None
-
-        self.visages = [Visage(visage.x - gauche, visage.y - haut,
-                               visage.largeur, visage.hauteur,
-                               (visage.oeil_droit[0] - gauche, visage.oeil_droit[1] - haut),
-                               (visage.oeil_gauche[0] - gauche, visage.oeil_gauche[1] - haut),
-                               visage.score)
-                        for visage in self.visages]
         self.au_changement()
 
     # ------------------------------------------------------------------
@@ -178,10 +239,22 @@ class OutilBandeaux:
 
     def _ce_qui_est_sous_le_point(self, x, y):
         """Ce que designe un point de la photo : nom de poignee, "corps", ou None."""
-        if self.bandeau_selectionne is not None:
-            poignee = poignee_sous_la_souris(self.bandeau_selectionne, x, y,
-                                             self._en_pixels_photo(TOLERANCE_POIGNEE),
+        bandeau = self.bandeau_selectionne
+        if bandeau is not None:
+            tolerance = self._en_pixels_photo(TOLERANCE_POIGNEE)
+            poignee = poignee_sous_la_souris(bandeau, x, y, tolerance,
                                              self._marge_rotation())
+            # Bandeau fin a l'ecran (moins de deux fois la tolerance) : les
+            # zones de ses deux poignees d'epaisseur le recouvrent alors en
+            # entier. Le prendre par son milieu pour le deplacer tirait une
+            # poignee : l'epaisseur tombait presque a zero et les yeux se
+            # decouvraient. La moitie centrale d'un bandeau fin sert donc a le
+            # deplacer ; le quart pres de chaque bord, ou la pastille de la
+            # poignee est dessinee, et ce qui depasse, tirent l'epaisseur.
+            if (poignee and poignee.startswith("epaisseur")
+                    and bandeau.epaisseur < 2 * tolerance
+                    and bandeau.contient(x, y, -bandeau.epaisseur / 4)):
+                poignee = None
             if poignee:
                 return poignee
         if self._bandeau_sous_le_point(x, y) is not None:
@@ -239,6 +312,11 @@ class OutilBandeaux:
             # photo, ou il ne serait plus visible nulle part.
             image = self.visionneuse.image
             self.bandeau_selectionne.limiter_au_cadre(image.width, image.height)
+        # Un bandeau retouche a la main reste tel quel : l'arrivee des visages
+        # ne doit plus le remplacer (voir recevoir_visages). Il revenait sinon
+        # sur la personne d'abord visee, et l'autre restait decouverte.
+        self.bandeaux_en_attente = [attente for attente in self.bandeaux_en_attente
+                                    if attente[2] is not self.bandeau_selectionne]
         self.dernier_point = (x, y)
         self._redessiner()
 
@@ -261,6 +339,13 @@ class OutilBandeaux:
 
     def _clic_dans_le_vide(self, x, y):
         """Pose un bandeau la ou l'utilisateur a clique (sections 9.3 et 9.4)."""
+        # 0. Un clic dans la bande sombre qui entoure la photo ne vise
+        #    personne. Il posait un bandeau hors de la photo : invisible, mais
+        #    compte, et la photo etait reenregistree pour rien a la validation.
+        image = self.visionneuse.image
+        if not (0 <= x <= image.width and 0 <= y <= image.height):
+            return
+
         # 1. Le clic tombe sur une tete detectee, mais a cote du bandeau deja
         #    pose dessus : on choisit ce bandeau plutot que d'en creer un autre.
         deja_pose = self._bandeau_du_visage_vise(x, y)
@@ -277,9 +362,22 @@ class OutilBandeaux:
             nouveau = Bandeau.depuis_yeux(visage.oeil_droit, visage.oeil_gauche)
             self.bandeaux_visages[index_visage] = nouveau
         else:
-            # 3. Aucun visage a cet endroit : bandeau manuel de taille standard.
-            nouveau = Bandeau.manuel_par_defaut(x, y, self.visionneuse.image.width)
+            # 3. Aucun visage a cet endroit : bandeau manuel de taille standard,
+            #    horizontal A L'ECRAN. Les bandeaux sont memorises dans le
+            #    repere de la photo non pivotee : si l'utilisateur l'a tournee
+            #    d'un quart de tour avec R, un bandeau d'angle 0 y serait
+            #    vertical a l'ecran. Tourner la photo de `rotation` degres
+            #    dans le sens des aiguilles d'une montre fait tourner ses
+            #    traits d'autant ; un bandeau incline de -rotation dans la
+            #    photo revient donc a l'horizontale une fois la photo tournee.
+            largeur_affichee, _ = self.visionneuse.dimensions_affichees()
+            nouveau = Bandeau.manuel_par_defaut(x, y, largeur_affichee,
+                                                angle=-self.visionneuse.rotation)
             self.bandeaux_manuels.append(nouveau)
+            if not self.visages_connus:
+                # Pas « aucun visage ici », mais « visages pas encore
+                # connus » : voir recevoir_visages.
+                self.bandeaux_en_attente.append((x, y, nouveau))
 
         self.bandeau_selectionne = nouveau
         self.au_changement()
@@ -292,12 +390,23 @@ class OutilBandeaux:
         double-clic retire celui qui se trouve sous le pointeur, quel qu'il
         soit. Double-cliquer dans le vide revient donc a poser un bandeau puis
         a le retirer aussitot, c'est-a-dire a ne rien faire.
+
+        Sur une poignee, en revanche, rien n'est retire : deux saisies rapides
+        d'une poignee forment un double-clic pour Tk, alors que l'utilisateur
+        retouchait simplement le bandeau en deux temps. Il disparaissait.
+
+        Renvoie True si un bandeau a ete retire.
         """
+        vise = self._ce_qui_est_sous_le_point(x, y)
+        if vise is not None and vise != "corps":
+            return False
         bandeau = self._bandeau_sous_le_point(x, y)
         if bandeau is None:
             bandeau = self._bandeau_du_visage_vise(x, y)
-        if bandeau is not None:
-            self._retirer(bandeau)
+        if bandeau is None:
+            return False
+        self._retirer(bandeau)
+        return True
 
     def _retirer(self, bandeau):
         """Retire un bandeau de la photo courante (rien n'est ecrit sur le disque)."""

@@ -66,7 +66,14 @@ installer_python_macos() {
 
 installer_python_linux() {
     if command -v apt-get >/dev/null 2>&1; then
-        commande="sudo apt-get install -y python3 python3-venv python3-tk"
+        if command -v python3 >/dev/null 2>&1; then
+            # python3 est la, mais trop ancien (Ubuntu 22.04 fournit 3.10) :
+            # le reinstaller n'y changerait rien. On demande une version plus
+            # recente, installee a cote, que trouver_python saura reconnaitre.
+            commande="sudo apt-get install -y python3.11 python3.11-venv python3.11-tk"
+        else
+            commande="sudo apt-get install -y python3 python3-venv python3-tk"
+        fi
     elif command -v dnf >/dev/null 2>&1; then
         commande="sudo dnf install -y python3 python3-tkinter"
     elif command -v pacman >/dev/null 2>&1; then

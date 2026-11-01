@@ -17,6 +17,7 @@ import os
 from PIL import Image
 
 from bandeaux import remplir_polygone_lisse
+from fichiers import deplacer_fichier
 from images import charger_image, enregistrer_au_format_origine, format_origine
 
 # Rotation d'examen (en degres, dans le sens des aiguilles d'une montre) ->
@@ -74,3 +75,27 @@ def chemin_sans_barre(chemin_photo):
 def tourner_sans_barre(chemin, rotation):
     """Pivote la version sans bandeaux comme la photo barree (arriere-plan)."""
     enregistrer_retouches(chemin, [], rotation)
+
+
+def deplacer_sans_barre(ancien_chemin_photo, nouveau_chemin_photo):
+    """Fait suivre a la version sans bandeaux d'une photo le deplacement de celle-ci.
+
+    Rien a faire si la photo n'en a pas. Si une version sans barre occupe deja
+    la place a l'arrivee, celle de depart reste ou elle est : rien n'est
+    ecrase. Le dossier « Sans-barre » de depart disparait s'il est vide.
+    """
+    depart = chemin_sans_barre(ancien_chemin_photo)
+    arrivee = chemin_sans_barre(nouveau_chemin_photo)
+    if not os.path.isfile(depart) or os.path.exists(arrivee):
+        return
+    os.makedirs(os.path.dirname(arrivee), exist_ok=True)
+    deplacer_fichier(depart, arrivee)
+    effacer_si_vide(os.path.dirname(depart))
+
+
+def effacer_si_vide(dossier):
+    """Supprime un dossier « Sans-barre » devenu vide."""
+    try:
+        os.rmdir(dossier)       # echoue sans rien effacer s'il reste un fichier
+    except OSError:
+        pass

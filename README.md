@@ -34,6 +34,12 @@ réinstallé.
 > par Homebrew sous macOS, par `winget` sous Windows, par le gestionnaire de
 > paquets de votre distribution sous Linux. Vous pouvez aussi refuser et
 > l'installer vous-même depuis <https://www.python.org/downloads/>.
+> Sous Linux, si le Python de la distribution est trop ancien (Ubuntu 22.04
+> fournit 3.10), le script propose `python3.11` ; si votre distribution ne
+> le fournit pas, installez une version récente vous-même.
+>
+> **Après une mise à jour de Python**, l'environnement isolé est refait tout
+> seul au lancement suivant, s'il ne fonctionne plus.
 >
 > **Sous macOS et Linux**, si le double-clic ne fait rien, il faut autoriser
 > une seule fois l'exécution, depuis un terminal placé dans le dossier :
@@ -114,6 +120,16 @@ déplace-t-il le bon côté, y compris quand la photo a été pivotée à l'écr
 python tester_rognage.py
 ```
 
+Deux derniers vérifient ce qui arrive aux fichiers : le **rangement**
+(préparation, tri, annulation, fichiers bloqués, photos revenues, gestion des
+dossiers) et le **réenregistrement des formats** (transparence, WEBP sans perte,
+HEIC très détaillé, formats refusés).
+
+```
+python tester_rangement.py
+python tester_formats.py
+```
+
 ### En cas de problème
 
 ```
@@ -127,17 +143,19 @@ votre avancement ne sont pas touchés.
 
 ## 2. Démarrage d'une session
 
-Au démarrage, deux possibilités :
+Au démarrage, trois possibilités :
 
 - **Démarrer un nouvel événement** — vous remplissez l'écran de configuration,
   puis le logiciel prépare tout seul les dossiers et les photos.
-- **Reprendre un événement existant** — vous désignez le dossier de l'événement
-  créé lors d'une session précédente, et vous repartez exactement là où vous
-  vous étiez arrêté.
+- **Reprendre « … »** — reprend en un clic le dernier événement ouvert.
+- **Reprendre un événement existant…** — vous désignez le dossier d'un
+  événement, et vous reprenez votre travail (section 8).
 
-> Pour reprendre un événement, choisissez le dossier **portant le nom de
-> l'événement**, celui qui a été créé *à l'intérieur* de votre dossier de
-> photos — et non le dossier de photos lui-même.
+> Pour reprendre un événement, choisissez **le dossier de l'événement** : votre
+> dossier de photos, renommé du nom de l'événement, celui qui contient les
+> dossiers de tri. Pour un événement créé avant le 26 octobre 2026, qui vivait
+> dans un sous-dossier de votre dossier de photos, choisir le dossier de photos
+> suffit : le logiciel trouve l'événement à l'intérieur.
 
 ---
 
@@ -147,40 +165,69 @@ Au démarrage, deux possibilités :
 
 Vous renseignez :
 
-1. le **dossier source**, celui où sont vos photos ;
-2. le **nom de l'événement** (par exemple « Mariage Julie et Marc ») ;
-3. **quatre dossiers de tri**, chacun avec un nom et une touche du clavier.
+1. le **dossier des photos** ;
+2. le **nom de l'événement** (par exemple « Mariage Julie et Marc ») — le nom
+   du dossier est proposé d'office ;
+3. vos **dossiers de tri**, chacun avec un nom et une touche du clavier.
 
-Le bouton « Continuer » ne s'active que si tout est correct : dossier existant et
-non vide, nom utilisable comme nom de dossier, quatre noms et quatre touches
-renseignés, et aucune touche utilisée deux fois. Les touches **R** et **C** sont
-réservées (pivoter et rogner) et ne peuvent pas servir de touche de tri.
+**Votre dossier de photos devient le dossier de l'événement** : il est renommé
+du nom de l'événement, et les dossiers de tri sont créés directement dedans. Il
+n'y a plus de sous-dossier supplémentaire. L'écran annonce ce renommage avant
+qu'il ait lieu. S'il est impossible (un fichier du dossier est ouvert dans un
+autre programme, synchronisation en cours, racine d'une carte mémoire), le tri
+se fait dans le dossier sous son nom actuel, et un message le signale. Si le
+nom est déjà pris par un dossier voisin, l'écran demande un autre nom.
+
+**Les dossiers de tri sont libres** : de 1 à 12. Le bouton **« + Ajouter un
+dossier »** en ajoute un (une touche libre est proposée), le bouton
+**« Retirer »** en enlève un. **La liste est retenue** : la prochaine fois, vous
+retrouvez vos dossiers tels que vous les avez laissés — noms, nombre et touches.
+
+Le bouton « Continuer » n'aboutit que si tout est correct : dossier existant et
+non vide, nom utilisable comme nom de dossier, chaque dossier de tri avec un nom
+et une touche, aucun nom ni aucune touche utilisés deux fois. Les touches **R**,
+**C** et **N** sont réservées (pivoter, rogner, nouveau dossier), et les noms
+`RAW`, `Videos`, `Sans-barre` et `_sauvegardes_temporaires` aussi : le logiciel
+s'en sert lui-même.
+
+> Si le dossier est synchronisé par **OneDrive** (ou Google Drive, Dropbox,
+> iCloud), l'écran vous le signale : voir la section 9 bis.
 
 ### Étape B — Préparation automatique
 
 Elle s'exécute une seule fois, sans rien vous demander :
 
 ```
-VotreDossierPhotos/
-├── (vos photos, renommées 1.jpg, 2.jpg, 3.jpg…)
-└── Mariage Julie et Marc/
-    ├── À garder/
-    ├── Ratées/
-    ├── À revoir/
-    ├── À supprimer/
-    ├── RAW/          (créé seulement s'il y a des fichiers RAW)
-    ├── Videos/       (créé seulement s'il y a des vidéos)
-    └── suivi.json    (votre avancement)
+Mariage Julie et Marc/        (votre dossier de photos, renommé)
+├── 1.jpg, 2.jpg, 3.jpg…      (les photos à trier, renommées)
+├── A garder/                 (vos dossiers de tri : ici, ceux proposés
+├── Ratees/                    d'office, que vous pouvez renommer à votre
+├── A revoir/                  goût, accents compris)
+├── A supprimer/
+├── RAW/          (créé seulement s'il y a des fichiers RAW)
+├── Videos/       (créé seulement s'il y a des vidéos)
+└── suivi.json    (votre avancement)
 ```
 
 - Les photos sont **renommées `1`, `2`, `3`…**, sans zéros devant, extension
   d'origine conservée, dans l'ordre **chronologique de prise de vue** : `1` est
   la photo la plus ancienne (date et heure), le dernier numéro la plus récente.
-  La date est lue dans la photo elle-même (EXIF) ; à défaut, on prend la plus
-  ancienne des dates du fichier.
+  La date est lue dans la photo elle-même (EXIF) : la date de prise de vue, ou
+  à défaut celle inscrite par l'appareil, avec son fuseau horaire quand
+  l'appareil l'indique (photos prises à l'étranger, nuit du changement
+  d'heure). Sans date lisible, on prend la plus ancienne des dates du fichier.
 - Les fichiers **RAW** (`.cr2`, `.nef`, `.arw`, `.dng`…) et les **vidéos**
   (`.mp4`, `.mov`, `.avi`, `.mkv`…) sont **mis de côté** et ne sont plus jamais
-  touchés ensuite.
+  touchés ensuite. Si un dossier `RAW/` ou `Videos/` existait déjà et contient un
+  fichier du même nom, ou si le fichier est occupé par un autre programme, il
+  reste à la racine et le compte rendu le signale : rien n'est jamais écrasé.
+- Les autres fichiers (textes, PDF…) ne sont ni renommés ni déplacés, pas plus
+  que les fichiers `._…` que macOS ajoute sur les clés et les cartes mémoire.
+- Un **sous-dossier** qui porterait le nom que doit recevoir une photo (un
+  dossier nommé `2.jpg`) est signalé avant tout renommage : renommez-le, puis
+  recommencez.
+- Si la préparation est interrompue (fichier bloqué, coupure de courant), la
+  reprise de l'événement propose de la terminer.
 
 > À noter : la numérotation porte sur **tous** les fichiers de la racine. Comme
 > les RAW et les vidéos reçoivent eux aussi un numéro avant d'être déplacés, la
@@ -189,10 +236,12 @@ VotreDossierPhotos/
 
 ### Étape C — Menu principal
 
-Quatre choix : **trier** les photos du dossier source, **revoir un dossier**
-(reclasser, barrer des yeux), **dupliquer un dossier**, ou quitter. Le menu
-rappelle votre avancement et le nombre de photos dans chaque dossier, copies
-comprises.
+Cinq choix : **trier** les photos du dossier source, **revoir un dossier**
+(reclasser, barrer des yeux), **gérer les dossiers de tri** (section 5 bis),
+**dupliquer un dossier**, ou quitter. Le menu rappelle votre avancement et le
+nombre de photos dans chaque dossier, copies comprises. Il signale aussi, en
+rouge, les photos rangées qui seraient revenues dans le dossier source, et un
+dossier synchronisé par OneDrive (section 9 bis).
 
 Le tri, la revue et la censure des yeux se font **dans la même fenêtre** : la
 censure n'est plus une étape à part, c'est le **mode barrer**, que la touche
@@ -210,7 +259,8 @@ en permanence, sous la forme « Photo 12 sur 340 ».
 
 | Touche ou action | Effet |
 |---|---|
-| **Vos 4 touches de tri** | Enregistrer les retouches en attente (rotation, bandeaux), déplacer la photo vers le dossier correspondant, puis afficher la suivante |
+| **Vos touches de tri** | Enregistrer les retouches en attente (rotation, bandeaux), déplacer la photo vers le dossier correspondant, puis afficher la suivante |
+| **N** | Créer un **nouveau dossier de tri** sans quitter le tri : une petite fenêtre demande son nom et sa touche (une touche libre est proposée). La photo affichée ne bouge pas : appuyez ensuite sur la touche du nouveau dossier pour l'y ranger. Le dossier est retenu pour vos prochains événements |
 | **Entrée** | Enregistrer les retouches en attente dans la photo, sans la déplacer, puis afficher la suivante |
 | **Barre d'espace** ou **flèche droite** | Passer à la photo suivante **sans** la ranger ni enregistrer ses retouches |
 | **Flèche gauche** | Revenir à la photo précédente, sans rien déplacer ni enregistrer |
@@ -225,10 +275,39 @@ en permanence, sous la forme « Photo 12 sur 340 ».
 Pendant le **rognage**, seules trois touches agissent : **Entrée** (rogner),
 **Échap** et **C** (abandonner). Toutes les autres sont inertes.
 
-Une photo au format **BMP, GIF ou TIFF** se trie normalement, mais ne peut être
-ni rognée ni barrée : son format ne se réenregistre pas sans perte de qualité.
-La barre du bas l'indique dès l'affichage, « format non modifiable : tri
-seulement ».
+> **Clavier AZERTY.** Sur un clavier français ou belge, la rangée des chiffres
+> donne `& é " ' (`… sans la touche Majuscule. Si vous avez choisi les touches
+> `1`, `2`, `3`…, inutile d'appuyer sur Majuscule : la touche marquée 1 range
+> dans le dossier de la touche 1, avec ou sans Majuscule, comme le pavé
+> numérique.
+
+La fenêtre s'ouvre agrandie la première fois, puis reprend la taille et la
+position que vous lui avez laissées.
+
+Une photo au format **BMP, GIF ou TIFF**, ou une image animée, se trie
+normalement, mais ne peut être ni rognée ni barrée : son format ne se
+réenregistre pas sans perte. La barre du bas l'indique dès l'affichage,
+« format non modifiable : tri seulement ».
+
+> **Fichier occupé.** Une photo ouverte dans un autre programme (OneDrive qui
+> l'envoie en ligne, antivirus…) ne peut pas être déplacée : le logiciel
+> réessaie deux secondes, puis vous prévient. Rien n'est perdu : rappuyez sur
+> la touche. Il en va de même pour Retour arrière : une annulation qui échoue
+> reste à faire, et un nouvel appui la reprend là où elle s'était arrêtée.
+>
+> **Enregistrement en cours.** Une photo HEIC met quelques secondes à
+> s'enregistrer. Si vous la rangez, l'annulez ou fermez la fenêtre juste
+> après l'avoir validée, la barre du bas affiche « Enregistrement en cours, un
+> instant... » : la fenêtre ne se fige pas, et l'action se fait dès que
+> l'enregistrement est fini. Les autres touches sont ignorées d'ici là.
+>
+> **Enregistrement raté.** Si une photo n'a pas pu être enregistrée (disque
+> plein, fichier bloqué), un message le dit et elle se réaffiche telle qu'elle
+> est sur le disque : le fichier d'origine est intact.
+>
+> **Chargement.** Une touche de tri pressée pendant que la barre affiche
+> « Chargement... » est ignorée : on ne range pas une photo qu'on n'a pas
+> vue. Attendez qu'elle apparaisse, puis rappuyez.
 
 ### Retouches : ce qui est enregistré, et quand
 
@@ -287,22 +366,32 @@ Repères utiles :
   nouveau cadrage.
 - Une copie intacte est gardée avant chaque rognage et chaque retouche :
   **Retour arrière** la remet en place. Ces copies sont effacées à la fermeture
-  de la fenêtre ; l'annulation d'une modification de la photo n'est donc
-  possible que tant qu'elle est ouverte. Un rangement, lui, reste annulable à
-  la session suivante.
+  de la fenêtre ; l'annulation n'est donc possible que tant qu'elle est
+  ouverte. Un rangement d'une session précédente se corrige en mode revue.
 
 L'étape est terminée lorsque toutes les photos ont été soit rangées, soit
-passées. Les photos passées restent dans le dossier source et pourront être
-traitées plus tard.
+passées. Les photos passées restent dans le dossier source, et **l'écran de fin
+indique combien il en reste** : appuyez sur **Entrée** pour les repasser
+aussitôt, sans revenir au menu.
+
+**Chaque ouverture du tri ne montre que les photos encore dans le dossier
+source**, c'est-à-dire pas encore rangées, à partir de la première. Les photos
+déjà rangées n'y reviennent pas ; pendant la session, la flèche gauche permet
+toutefois de revenir sur une photo que l'on vient de ranger.
+
+Le logiciel retient dans quel dossier vous avez rangé chaque photo. Si une
+photo rangée se retrouve plus tard dans le dossier source — c'est ce que fait
+parfois OneDrive, voir la section 9 bis —, il vous le dit à l'ouverture du tri
+et propose de la remettre dans son dossier.
 
 ---
 
 ## 5. Revoir un dossier — reclasser ou censurer
 
 Pour corriger un rangement après coup, ou pour barrer des yeux. Depuis le menu,
-choisissez **« Revoir un dossier »**, puis l'un des quatre dossiers de tri ou
-l'une des copies (section 7) : ses photos défilent une par une, dans la même
-fenêtre qu'au tri.
+choisissez **« Revoir un dossier »**, puis l'un des dossiers de tri ou l'une des
+copies (section 7) : ses photos défilent une par une, dans la même fenêtre
+qu'au tri.
 
 Par exemple, en revoyant « À garder », vous tombez sur une photo ratée : appuyez
 sur la touche de « Ratées », elle y est **déplacée immédiatement** et la photo
@@ -316,12 +405,12 @@ suivante s'affiche.
 | **Barre d'espace** ou **flèche droite** | Passer à la photo suivante sans la déplacer ni l'enregistrer |
 | **Flèche gauche** | Revenir à la photo précédente, sans rien déplacer |
 | **Retour arrière** | Annuler le dernier déplacement, la dernière retouche ou le dernier rognage |
-| **R**, **C**, **Tab**, molette, cliquer-glisser | Comme au tri : pivoter, rogner, mode barrer, zoomer, déplacer la vue |
+| **R**, **C**, **N**, **Tab**, molette, cliquer-glisser | Comme au tri : pivoter, rogner, nouveau dossier, mode barrer, zoomer, déplacer la vue |
 | **Échap** | Enregistrer l'avancement et fermer |
 
 Ce qu'il faut savoir :
 
-- Les quatre dossiers de tri sont les seules destinations possibles. Dans une
+- Les dossiers de tri sont les seules destinations possibles. Dans une
   **copie** (section 7), les touches de tri sont sans effet : ses photos n'en
   sortent pas, on n'y fait que retoucher et barrer des yeux.
 - Si le dossier de destination contient déjà un fichier du même nom, **rien
@@ -332,6 +421,28 @@ Ce qu'il faut savoir :
 - Rouvrir le même dossier reprend à la photo où vous vous étiez arrêté ; les
   photos rangées entre-temps dans ce dossier sont ajoutées à la fin. Une fois le
   dossier revu en entier, le rouvrir repart du début.
+- Une photo que la synchronisation aurait remise dans le dossier source est
+  montrée depuis celui-ci (la barre du bas l'indique) : une touche de tri la
+  range de nouveau.
+
+---
+
+## 5 bis. Gérer les dossiers de tri
+
+Depuis le menu, **« Gérer les dossiers de tri »** ouvre la liste des dossiers de
+tri de l'événement, avec le nombre de photos de chacun. Vous pouvez :
+
+- **renommer** un dossier — il est renommé sur le disque, ses photos avec lui ;
+- **changer sa touche** ;
+- **ajouter** un dossier (bouton « + Ajouter un dossier ») ;
+- **retirer** un dossier, **seulement s'il est vide** : un dossier qui contient
+  encore des fichiers ne peut pas être retiré, pour qu'aucune photo ne soit
+  perdue ou déplacée par mégarde. Videz-le d'abord, par exemple en reclassant
+  ses photos en mode revue. Un dossier retiré, vide, est supprimé du disque.
+
+Rien n'est modifié avant « Enregistrer ». La nouvelle liste est aussi retenue
+pour vos prochains événements. Pour échanger les noms de deux dossiers, passez
+par un nom provisoire, en deux fois.
 
 ---
 
@@ -353,12 +464,18 @@ position des deux yeux ; leur nombre s'affiche à côté de la pastille.
 ### Poser un bandeau
 
 - **Cliquez sur la tête d'une personne** : un bandeau noir apparaît sur ses
-  yeux, entouré de ses poignées.
+  yeux, entouré de ses poignées. Le clic est rattaché au visage détecté dont
+  la tête (un peu élargie, cheveux et oreilles compris) le contient ; si
+  plusieurs têtes se chevauchent, à celui dont les yeux sont les plus proches
+  du clic.
 - **Double-cliquez sur un bandeau** : il disparaît.
 
 Chaque personne est indépendante : vous pouvez masquer certains visages et en
 laisser d'autres visibles. Le bandeau **épouse l'inclinaison de la tête** : il
-s'aligne sur la ligne qui joint les deux yeux. Ses bords sont lissés : même
+s'aligne sur la ligne qui joint les deux yeux, **même sur une tête très
+penchée**. Pour cela, chaque visage détecté est redressé puis examiné de
+nouveau, et la photo est aussi parcourue inclinée à 45°, dans un sens puis
+dans l'autre, pour trouver les têtes couchées. Ses bords sont lissés : même
 incliné, il ne présente pas de marches d'escalier, à l'écran comme dans le
 fichier enregistré.
 
@@ -371,7 +488,9 @@ lancez `python tester_bandeau.py`.
 
 Si une personne n'a pas été détectée (visage de profil, lunettes de soleil, yeux
 fermés…), **cliquez à l'endroit de ses yeux** : un bandeau de taille standard
-apparaît au même endroit.
+apparaît au même endroit, horizontal à l'écran — même si vous avez pivoté la
+photo avec R, et même si elle est collée à une personne détectée. Un clic
+dans la bande sombre autour de la photo ne pose rien.
 
 ### Retoucher un bandeau
 
@@ -391,11 +510,13 @@ cinq poignées apparaissent.
 
 Les poignées vont par paires, une de chaque côté : prenez celle qui tombe sous
 votre souris. La forme du pointeur indique ce que vous vous apprêtez à saisir,
-et la poignée survolée se met en avant.
+et la poignée survolée se met en avant. Sur un bandeau fin à l'écran, l'intérieur
+sert à le déplacer : son épaisseur se tire juste au-dessus ou au-dessous.
 
-> Un bandeau se retire **uniquement** par un double-clic. Un simple clic ne
-> l'efface jamais : c'est ce qui permet d'attraper une poignée, ou de déplacer
-> un bandeau, sans risquer de le faire disparaître par mégarde.
+> Un bandeau se retire **uniquement** par un double-clic sur lui. Un simple
+> clic ne l'efface jamais, pas plus qu'un double-clic sur une poignée (deux
+> retouches rapides de suite) : c'est ce qui permet d'attraper une poignée, ou
+> de déplacer un bandeau, sans risquer de le faire disparaître par mégarde.
 
 Le zoom et la rotation restent disponibles : les bandeaux suivent la photo
 quand vous la pivotez, et s'enregistrent exactement là où vous les voyez.
@@ -427,24 +548,29 @@ un dossier temporaire. La touche Retour arrière restaure cette copie.
 Depuis le menu principal, le bouton **« Dupliquer un dossier »** fait une copie
 complète de l'un de vos dossiers, à côté de l'original.
 
-C'est utile parce que **la censure réécrit les photos sur place** : une fois les
-bandeaux validés, la version sans bandeaux n'existe plus. En dupliquant d'abord,
-vous gardez les deux versions.
+C'est utile parce que **la censure réécrit les photos sur place**. Le
+sous-dossier `Sans-barre` garde bien une version sans bandeaux de chaque photo
+barrée (section 4), mais dupliquer le dossier avant de le censurer reste le
+moyen le plus simple de garder tous les originaux ensemble, barrés ou non.
 
 Le déroulé :
 
-1. Vous choisissez le dossier à copier (les quatre dossiers de tri, ainsi que
-   les copies déjà faites).
+1. Vous choisissez le dossier à copier (les dossiers de tri, ainsi que les
+   copies déjà faites).
 2. Le logiciel propose un nom, « Nom du dossier - copie », que vous pouvez
-   changer. Un nom déjà pris ou impossible est refusé, et vous êtes invité à en
-   saisir un autre.
+   changer. Un nom déjà pris (même par un dossier de l'événement disparu du
+   disque), impossible, ou réservé au logiciel (`RAW`, `Videos`,
+   `Sans-barre`, `_sauvegardes_temporaires`) est refusé, et vous êtes invité
+   à en saisir un autre.
 3. La copie s'effectue en affichant son avancement. Sur plusieurs milliers de
-   photos, comptez quelques minutes.
+   photos, comptez quelques minutes. Si elle échoue en cours de route (disque
+   plein, fichier occupé), le dossier à moitié copié est effacé.
 
 Ce qu'il faut savoir :
 
-- Une copie **n'est pas un cinquième dossier de tri** : le tri en compte
-  toujours quatre, chacun avec sa touche. La copie ne reçoit donc pas de touche.
+- Une copie **n'est pas un dossier de tri** : elle ne reçoit pas de touche, et
+  le tri n'y range rien. Pour un dossier de tri supplémentaire, utilisez
+  « Gérer les dossiers de tri » (section 5 bis) ou la touche N pendant le tri.
 - Une copie **peut être censurée** comme n'importe quel dossier : elle apparaît
   dans la liste proposée par « Revoir un dossier ».
 - La copie ne concerne que les fichiers posés directement dans le dossier.
@@ -462,9 +588,19 @@ Vous pouvez fermer le logiciel à n'importe quel moment. Votre avancement est
 enregistré dans `suivi.json`, à l'intérieur du dossier de l'événement, et mis à
 jour **après chaque action**.
 
-À la réouverture, choisissez « Reprendre un événement existant » : la préparation
-automatique n'est pas rejouée, et chaque étape repart exactement là où vous vous
-étiez arrêté, même après plusieurs centaines de photos.
+À la réouverture, un bouton reprend directement le dernier événement ouvert ;
+pour un autre, choisissez « Reprendre un événement existant… ». La préparation
+automatique n'est pas rejouée. Le tri reprend avec les photos encore dans le
+dossier source (celles passées avec Espace comprises, à partir de la
+première), et la revue d'un dossier à la photo où vous l'aviez laissée. Seule
+exception : une préparation qui avait été interrompue est proposée à la
+reprise, pour être terminée.
+
+Le logiciel retient aussi, d'une ouverture à l'autre, vos dossiers de tri, le
+dernier événement ouvert, le dossier où vous allez chercher vos photos et la
+taille de la fenêtre de tri. Ces préférences sont dans le fichier
+`preferences.json`, à côté du programme ; le supprimer revient simplement aux
+valeurs par défaut.
 
 ---
 
@@ -472,10 +608,49 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 
 | Type | Traitement |
 |---|---|
-| JPEG, PNG | Triés **et** censurés |
-| HEIC (iPhone) | Triés et censurés, lus et réenregistrés dans leur format |
+| JPEG, PNG, WEBP | Triés **et** censurés. Un WEBP sans perte le reste ; la transparence d'un PNG est conservée |
+| HEIC (iPhone) | Triés et censurés, lus et réenregistrés dans leur format. Une photo très détaillée est enregistrée un peu plus compressée s'il le faut, pour rester lisible (voir ci-dessous) |
+| BMP, GIF, TIFF, images animées | **Triés seulement** : le rognage et les bandeaux sont refusés avec un message, ces formats ne se réenregistrant pas sans perte. Le contenu du fichier compte, pas seulement son extension : un GIF nommé `.jpg` est reconnu |
 | RAW (`.cr2`, `.nef`, `.arw`, `.dng`…) | Mis de côté dans `RAW/`, jamais modifiés |
 | Vidéo (`.mp4`, `.mov`, `.avi`, `.mkv`…) | Mis de côté dans `Videos/`, jamais traités |
+
+Une image de plus de 8 bits par couleur (PNG 16 bits, HEIC 10 bits) s'affiche
+et se censure normalement, et s'enregistre en 8 bits : la différence ne se voit
+pas à l'écran.
+
+**HEIC très détaillé.** Le décodeur HEIC installé avec le logiciel ne relit pas
+un fichier HEIC dont l'image compressée dépasse 16 Mo. Une photo de 24 ou
+48 Mpx très détaillée, réenregistrée en haute qualité, pouvait y arriver, et
+devenait « illisible » dans le logiciel (Windows, lui, la lisait). Un gros
+fichier est donc relu avant de remplacer l'original, et réenregistré un peu
+plus compressé tant qu'il ne se relit pas.
+
+---
+
+## 9 bis. OneDrive et les autres services de synchronisation
+
+Un dossier synchronisé (OneDrive, Google Drive, Dropbox, iCloud) peut **défaire
+après coup le rangement d'une photo** : le déplacement réussit, puis, quelques
+secondes ou minutes plus tard, le service remet la photo dans le dossier source.
+C'est ce qui explique des photos « triées » retrouvées dans le dossier source
+après un tri complet, sans aucun message d'erreur.
+
+Le logiciel ne peut pas l'empêcher, mais :
+
+- il vous **prévient** dès l'écran de configuration, à la fin de la
+  préparation, et dans le menu, quand le dossier est synchronisé ;
+- il **retient dans quel dossier vous avez rangé chaque photo**. À l'ouverture
+  du tri, et quand vous repassez les photos restantes depuis l'écran de fin, il
+  repère les photos revenues dans le dossier source, vous en donne la liste, et
+  propose de les **remettre dans leur dossier** (« Non » les laisse à trier) ;
+- une photo présente en double, identique, dans le dossier source et dans son
+  dossier de tri, est dédoublonnée sans perte ; si les deux fichiers diffèrent,
+  rien n'est touché.
+
+**Le plus sûr est de suspendre la synchronisation le temps du tri** : icône
+OneDrive dans la barre des tâches → roue dentée → « Suspendre la
+synchronisation ». Ou de trier dans un dossier non synchronisé, puis de
+déplacer le résultat dans OneDrive.
 
 ---
 
@@ -485,8 +660,17 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 |---|---|
 | `main.py` | Lancement, gestion des sessions, menu principal |
 | `configuration.py` | Écran de configuration d'un nouvel événement |
+| `dossiers_tri.py` | Dossiers de tri : valeurs par défaut, règles des noms et des touches |
+| `editeur_dossiers.py` | Saisie des dossiers de tri (lignes nom + touche), boîte de la touche N |
+| `gestion_dossiers.py` | Gestion des dossiers de tri d'un événement commencé |
+| `preferences.py` | Ce qui est retenu d'une ouverture à l'autre |
 | `preparation.py` | Création des dossiers, renommage, mise à l'écart RAW/vidéo |
 | `tri.py` | Tri : lance la fenêtre de rangement sur le dossier source |
+| `remise_en_place.py` | Photos rangées revenues dans le dossier source |
+| `synchronisation.py` | Reconnaît un dossier OneDrive, Google Drive, Dropbox, iCloud |
+| `touches.py` | Touches réservées, touches de tri sur un clavier AZERTY |
+| `fichiers.py` | Déplacer, renommer, remplacer, en réessayant quand Windows refuse |
+| `ecritures.py` | Enregistrement des photos modifiées en arrière-plan |
 | `revue.py` | Revue : lance la fenêtre de rangement sur un dossier de tri ou une copie |
 | `rangement.py` | La fenêtre unique : clavier, déplacements, retouches, mode barrer, navigation, annulation |
 | `visionneuse.py` | Affichage d'une photo : zoom, vue, rotation, cadre de rognage par les bords, relais des clics |
@@ -507,6 +691,8 @@ automatique n'est pas rejouée, et chaque étape repart exactement là où vous 
 | `verifier_installation.py` | Contrôle que l'installation est fonctionnelle |
 | `tester_bandeau.py` | Vérifie que le bandeau couvre les yeux, et rien de plus |
 | `tester_rognage.py` | Vérifie la géométrie du cadre de rognage, rotations comprises |
+| `tester_rangement.py` | Vérifie la préparation, le tri, l'annulation, les fichiers bloqués, les bandeaux à la souris |
+| `tester_formats.py` | Vérifie le réenregistrement de chaque format d'image |
 
 Les règles de conception du projet sont consignées dans `CLAUDE.md`.
 
@@ -535,10 +721,17 @@ n'est possible que tant que le logiciel n'a pas été fermé.
 **Windows refuse de déplacer mon dossier : « un fichier ou dossier est ouvert ».**
 Cela veut dire que le logiciel tourne encore. Tant qu'il lit des photos en
 arrière-plan, Windows considère le dossier comme ouvert. Fermez le logiciel par
-le bouton **Quitter** du menu (ou par Échap) : le programme relâche alors tous
-les fichiers et se termine pour de bon. Si un message d'erreur inattendu
-apparaît, fermez-le puis quittez normalement — le menu revient toujours à
-l'écran, même après une erreur.
+le bouton **Quitter** du menu (ou sa croix de fermeture) : le programme relâche
+alors tous les fichiers et se termine pour de bon. Si un message d'erreur
+inattendu apparaît, fermez-le puis quittez normalement : le menu revient à
+l'écran.
+
+**Le bandeau ne suit pas une tête très penchée.**
+C'était un défaut de la détection, corrigé : sur les petits visages surtout,
+elle plaçait les yeux presque à l'horizontale quelle que soit la tête.
+Mesuré sur de vraies photos, les yeux sont désormais entièrement couverts dans
+94 à 95 % des cas jusqu'à 70° d'inclinaison, contre 0 à 36 % auparavant. Pour
+les cas restants, tirez la poignée bleue pour incliner le bandeau.
 
 **Le bandeau disparaît quand j'essaie de le retoucher.**
 C'était un défaut, corrigé : un simple clic ne retire plus jamais un bandeau,
@@ -550,6 +743,18 @@ bandeau, puis tirez la poignée du haut ou du bas pour l'épaissir sur cette
 photo-là. Si le cas se répète, la valeur générale se règle dans `bandeaux.py`
 (`FACTEUR_EPAISSEUR`) ; `python tester_bandeau.py` dit aussitôt si la nouvelle
 valeur couvre encore tous les yeux.
+
+**Des photos que j'avais triées sont revenues dans le dossier source.**
+C'est presque toujours la synchronisation (OneDrive…) qui a défait leur
+déplacement : voir la section 9 bis. Ouvrez « Trier » : le logiciel les
+repère et propose de les remettre dans leur dossier. Pour l'éviter, suspendez
+la synchronisation pendant le tri.
+
+**Mes touches 1, 2, 3 ne rangent rien.**
+Sur un clavier AZERTY, elles fonctionnent désormais avec ou sans Majuscule. Si
+le problème persiste, vérifiez que la fenêtre de tri a bien le clavier (cliquez
+une fois sur la photo) et que la touche est bien celle d'un dossier de tri : la
+barre du bas les rappelle.
 
 **Puis-je récupérer une photo mise dans « À supprimer » ?**
 Oui : le logiciel ne supprime jamais aucun fichier. Il ne fait que les déplacer.

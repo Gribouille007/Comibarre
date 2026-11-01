@@ -3,11 +3,12 @@ Fenetre unique du logiciel : tri, revue et censure des yeux (sections 8, 8 bis
 et 9).
 
 Les photos defilent une par une en grand, et une touche du clavier deplace la
-photo affichee vers l'un des quatre dossiers de tri. Seul change le dossier
-d'ou viennent les photos :
+photo affichee vers l'un des dossiers de tri. La touche N cree un nouveau
+dossier de tri sans quitter la fenetre. Seul change le dossier d'ou viennent
+les photos :
 
 - a l'etape de tri, le dossier source, ou attendent les photos brutes ;
-- en revue, l'un des quatre dossiers de tri, que l'on repasse pour corriger un
+- en revue, l'un des dossiers de tri, que l'on repasse pour corriger un
   rangement, ou l'une des copies faites depuis le menu. Une copie n'a pas de
   touche de tri : on n'y fait que retoucher et censurer.
 
@@ -27,19 +28,27 @@ depuis le dossier ou elle se trouve maintenant, et une touche de tri la deplace
 de ce dossier vers le nouveau.
 """
 
+import filecmp
+import gc
 import os
 import shutil
 import tkinter as tk
 from tkinter import messagebox
 
+import preferences
 import theme
+import touches
 from censure import OutilBandeaux
+from dossiers import photos_du_dossier
 from ecritures import EcrituresEnArrierePlan, signaler_les_echecs
+from editeur_dossiers import demander_nouveau_dossier
+from fichiers import deplacer_fichier, remplacer_fichier, supprimer_fichier
 from images import (ChargeurAnticipe, copie_de_sauvegarde, est_modifiable,
-                    fabriquer_apercu)
+                    extension_modifiable, fabriquer_apercu)
 from polices import police
-from retouches import (appliquer_retouches, chemin_sans_barre, enregistrer_retouches,
-                       tourner_sans_barre)
+from remise_en_place import proposer_de_remettre_en_place
+from retouches import (appliquer_retouches, chemin_sans_barre, deplacer_sans_barre,
+                       effacer_si_vide, enregistrer_retouches, tourner_sans_barre)
 from rognage import cadre_dans_le_sens_d_origine, rogner_fichier, rogner_image
 from visages import DetecteurVisages, DetectionAnticipee
 from visionneuse import Visionneuse
@@ -78,14 +87,31 @@ class FenetreRangement:
         dossier_origine : nom du dossier d'ou viennent les photos, ou None
                           pour le dossier source (etape de tri).
         """
+        # Fait le menage des fenetres fermees avant de lancer les fils
+        # d'arriere-plan. Une fenetre fermee (tri, revue, boite de saisie) ne
+        # disparait pas tout de suite : ses objets se referencent les uns les
+        # autres, et c'est le ramasse-miettes de Python qui les detruit, plus
+        # tard, depuis le fil qui se trouve alors en train de travailler. Or
+        # detruire une image ou une variable Tkinter passe par Tkinter, qui
+        # n'obeit qu'au fil principal : le fil de chargement restait alors
+        # bloque, la photo ouverte, tant que le fil principal etait occupe. Si
+        # celui-ci etait justement en train de ranger cette photo, Windows
+        # refusait de la deplacer, et elle restait dans le dossier source
+        # (en double, avec l'ancien `shutil.move`). Collecte ici, sur le fil
+        # principal, ce menage ne peut plus tomber sur un autre fil.
+        gc.collect()
+
         self.suivi = suivi
         self.etat = etat
         self.photos = etat["photos"]
         self.dossier_origine = dossier_origine
-        # Les touches de tri ne servent qu'au dossier source et aux quatre
-        # dossiers de tri. Dans une copie, elles creeraient des doublons.
+        # Les touches de tri ne servent qu'au dossier source et aux dossiers
+        # de tri. Dans une copie, elles creeraient des doublons.
         self.touches_de_tri = (dossier_origine is None
                                or dossier_origine in suivi.noms_dossiers_tri)
+        # Passe a True quand, au bout des photos, l'utilisateur demande a
+        # repasser celles qui restent dans le dossier source (voir tri.lancer_tri).
+        self.recommencer = False
 
         # Les apercus sont d'abord prepares a la taille de l'ecran, que la
         # fenetre ne peut pas depasser, puis a celle de la zone d'affichage des
@@ -97,13 +123,27 @@ class FenetreRangement:
         # localise donc des maintenant. Sans cela, le chargement anticipe lisait
         # des chemins perimes, echouait, et chaque photo deplacee devait ensuite
         # etre relue au moment de l'afficher, avec l'attente que cela suppose.
-        chemins = [self._localiser(nom)[1] or os.path.join(dossier, nom)
+        # Le dossier d'origine est lu une seule fois : interroger le disque
+        # photo par photo prenait 0,2 s pour 3 000 photos.
+        dans_l_origine = set(photos_du_dossier(dossier))
+        chemins = [os.path.join(dossier, nom) if nom in dans_l_origine
+                   else self._localiser(nom)[1] or os.path.join(dossier, nom)
                    for nom in self.photos]
-        self.chargeur = ChargeurAnticipe(chemins, taille_ecran)
         self.ecritures = EcrituresEnArrierePlan()
+        # Le chargeur attend la fin de l'enregistrement d'une photo avant de la
+        # relire : sinon il en relirait l'ancienne version (voir images.py).
+        self.chargeur = ChargeurAnticipe(chemins, taille_ecran,
+                                         attendre_ecriture=self.ecritures.attendre)
         self.attente = None          # nouvel essai programme si la photo n'est pas chargee
         self.attente_visages = None  # idem pour la detection des visages
         self.visages_recus = False   # les visages de la photo affichee sont-ils connus ?
+        # Action remise a plus tard, le temps qu'un enregistrement en cours se
+        # termine (voir _attendre_les_enregistrements).
+        self.attente_enregistrement = None
+        self.surveillance = None     # verification reguliere des enregistrements
+        # Vrai apres un enregistrement du suivi rate : on ne previent qu'une
+        # fois (voir _noter_avancement).
+        self.avancement_en_echec = False
 
         # Redimensionnement de la fenetre : voir _zone_d_affichage_changee.
         self.attente_apercus = None
@@ -121,20 +161,35 @@ class FenetreRangement:
         self.detection = None
 
         self.fenetre = tk.Toplevel(racine)
-        self.fenetre.title(titre)
-        self.fenetre.geometry("1200x800")
-        self.fenetre.configure(bg=COULEUR_FOND)
-        self.fenetre.protocol("WM_DELETE_WINDOW", self.quitter)
+        try:
+            self.fenetre.title(titre)
+            # La fenetre reprend la taille qu'on lui avait laissee ; la premiere
+            # fois, elle s'ouvre agrandie : une photo se juge mieux en grand.
+            fenetre_retenue = preferences.fenetre_de_tri()
+            self.fenetre.geometry(fenetre_retenue["geometrie"])
+            if fenetre_retenue["agrandie"]:
+                theme.agrandir(self.fenetre)
+            self.fenetre.configure(bg=COULEUR_FOND)
+            self.fenetre.protocol("WM_DELETE_WINDOW", self.quitter)
 
-        self._construire()
-        self.outil = OutilBandeaux(self.visionneuse, self._mettre_a_jour_barre)
-        if suivi.mode_barrer and not self._activer_barrage():
-            suivi.mode_barrer = False
+            self._construire()
+            self.outil = OutilBandeaux(self.visionneuse, self._mettre_a_jour_barre)
+            if suivi.mode_barrer and not self._activer_barrage():
+                suivi.mode_barrer = False
 
-        self.fenetre.bind("<Key>", self._touche)
-        self.fenetre.focus_force()
-        self.fenetre.after(60, self.afficher_photo_courante)
-        self.surveillance = self.fenetre.after(300, self._surveiller_ecritures)
+            self.fenetre.bind("<Key>", self._touche)
+            self.fenetre.focus_force()
+            self.fenetre.after(60, self.afficher_photo_courante)
+            self.surveillance = self.fenetre.after(300, self._surveiller_ecritures)
+        except Exception:
+            # Une fenetre a moitie construite ne doit ni rester a l'ecran (sa
+            # croix de fermeture echouait), ni laisser ses fils tourner.
+            if self.detection is not None:
+                self.detection.arreter()
+            self.chargeur.arreter()
+            self.ecritures.arreter()
+            self.fenetre.destroy()
+            raise
 
     # ------------------------------------------------------------------
     # Interface
@@ -172,21 +227,32 @@ class FenetreRangement:
                                             anchor="w")
         self.etiquette_retouches.pack(side="left")
 
-        touches = ""
-        if self.touches_de_tri:
-            touches = "   ".join("[%s] %s" % (dossier["touche"], dossier["nom"])
-                                 for dossier in self.suivi.dossiers_tri) + "\n"
-        # Les touches de rangement sont mises sur leur propre ligne : ce sont
-        # celles que l'on cherche des yeux a chaque photo, et elles se perdaient
-        # au milieu d'une seule longue ligne de rappels.
-        self.rappel = (touches
-                       + "[Entree] enregistrer et suivante   [Espace] [→] suivante   "
-                         "[←] precedente   [Retour arriere] annuler   [R] pivoter   "
-                         "[C] rogner   [Tab] mode barrer   [Echap] quitter")
         self.etiquette_rappel = tk.Label(barre, text="", bg=COULEUR_BARRE,
                                          fg=COULEUR_RAPPEL, font=police(9),
                                          anchor="w", justify="left")
         self.etiquette_rappel.pack(side="top", fill="x", padx=14, pady=(6, 10))
+        # Avec beaucoup de dossiers, la ligne des touches de tri peut depasser
+        # la largeur de la fenetre : elle passe alors a la ligne au lieu d'etre
+        # coupee.
+        barre.bind("<Configure>", lambda evenement: self.etiquette_rappel.config(
+            wraplength=max(evenement.width - 28, 100)))
+
+    def _texte_des_touches(self):
+        """Rappel des touches, refait a chaque fois : la touche N ajoute des dossiers."""
+        touches_de_tri = ""
+        if self.touches_de_tri:
+            # Les touches de rangement sont mises sur leur propre ligne : ce
+            # sont celles que l'on cherche des yeux a chaque photo, et elles se
+            # perdaient au milieu d'une seule longue ligne de rappels.
+            touches_de_tri = "   ".join("[%s] %s" % (dossier["touche"], dossier["nom"])
+                                        for dossier in self.suivi.dossiers_tri)
+            if not self.suivi.dossier_tri_pour_touche("n"):
+                touches_de_tri += "      [N] nouveau dossier"
+            touches_de_tri += "\n"
+        return (touches_de_tri
+                + "[Entree] enregistrer et suivante   [Espace] [→] suivante   "
+                  "[←] precedente   [Retour arriere] annuler   [R] pivoter   "
+                  "[C] rogner   [Tab] mode barrer   [Echap] quitter")
 
     def _zone_d_affichage_changee(self, evenement):
         """La zone d'affichage a change de taille : les apercus seront refaits.
@@ -239,9 +305,9 @@ class FenetreRangement:
         if self.visionneuse.en_rognage:
             texte = RAPPEL_ROGNAGE
         elif self.suivi.mode_barrer:
-            texte = RAPPEL_BARRER + "\n" + self.rappel
+            texte = RAPPEL_BARRER + "\n" + self._texte_des_touches()
         else:
-            texte = self.rappel
+            texte = self._texte_des_touches()
         self.etiquette_rappel.config(text=texte)
 
     def _mettre_a_jour_barre(self):
@@ -305,9 +371,9 @@ class FenetreRangement:
 
         Une photo n'est pas forcement la ou elle etait au lancement : elle a pu
         etre rangee, ici ou lors d'une session precedente. On la cherche d'abord
-        dans le dossier d'origine, puis dans les quatre dossiers de tri. Les
-        photos etant numerotees une fois pour toutes (1, 2, 3...), un meme nom
-        ne designe qu'une seule photo dans tout l'evenement.
+        dans le dossier d'origine, puis dans les dossiers de tri. Les photos
+        etant numerotees une fois pour toutes (1, 2, 3...), un meme nom ne
+        designe qu'une seule photo dans tout l'evenement.
 
         Exception : une copie contient les memes noms que les dossiers de tri,
         et ses photos n'en sortent jamais. On ne cherche donc que dans la copie.
@@ -319,6 +385,11 @@ class FenetreRangement:
         if self.touches_de_tri:
             candidats += [nom for nom in self.suivi.noms_dossiers_tri
                           if nom != self.dossier_origine]
+            # En revue, une photo peut aussi etre revenue dans le dossier
+            # source (synchronisation qui defait un rangement) : elle y est
+            # trouvee, au lieu d'etre annoncee « introuvable ».
+            if self.dossier_origine is not None:
+                candidats.append(None)
         for nom_dossier in candidats:
             chemin = os.path.join(self._chemin_du_dossier(nom_dossier), nom_fichier)
             if os.path.isfile(chemin):
@@ -348,9 +419,10 @@ class FenetreRangement:
         texte = "Photo %d sur %d   -   %s" % (self.position + 1, len(self.photos), nom_fichier)
         if chemin is not None and dossier_actuel != self.dossier_origine:
             texte += "   -   actuellement dans « %s »" % (dossier_actuel or "dossier source")
-        if not est_modifiable(nom_fichier):
+        if not extension_modifiable(nom_fichier):
             # Dit des maintenant que cette photo ne se retouche pas, plutot que
-            # de le decouvrir apres avoir pose des bandeaux pour rien.
+            # de le decouvrir apres avoir pose des bandeaux pour rien. (Seule
+            # l'extension compte ici : voir images.extension_modifiable.)
             texte += "   -   format non modifiable : tri seulement"
         self.etiquette_avancement.config(text=texte)
         self._mettre_a_jour_rappel()
@@ -406,7 +478,7 @@ class FenetreRangement:
             self.attente_visages = self.fenetre.after(
                 DELAI_ATTENTE_CHARGEMENT, self._donner_les_visages_des_que_prets, index)
             return
-        self.outil.visages = self.detection.visages(index)
+        self.outil.recevoir_visages(self.detection.visages(index))
         self.visages_recus = True
         self._mettre_a_jour_barre()
 
@@ -426,13 +498,53 @@ class FenetreRangement:
             self.attente_apercus = None
 
     def _afficher_fin(self):
+        """Ecran de fin : au tri, dit combien de photos restent dans le dossier source.
+
+        Il en reste quand certaines ont ete passees (Espace, fleche, Entree),
+        ramenees par une annulation, ou remises la par un service de
+        synchronisation. Entree permet de les repasser aussitot, sans revenir
+        au menu : sans ce decompte, on pouvait croire tout trie alors que des
+        photos attendaient encore.
+        """
         self.etiquette_avancement.config(text="Toutes les photos ont ete parcourues")
-        self.visionneuse.afficher_texte(
-            "Toutes les photos ont ete parcourues.\n"
-            "Fleche gauche pour revenir en arriere, Echap pour revenir au menu.")
+        restantes = self._photos_restantes()
+        if restantes:
+            texte = ("Toutes les photos ont ete parcourues.\n"
+                     "Il en reste %d dans le dossier source, pas encore rangee(s).\n\n"
+                     "Entree : les repasser maintenant\n"
+                     "Fleche gauche : revenir en arriere      Echap : revenir au menu"
+                     % restantes)
+        elif self.dossier_origine is None:
+            texte = ("Toutes les photos sont rangees : le dossier source est vide.\n\n"
+                     "Fleche gauche : revenir en arriere      Echap : revenir au menu")
+        else:
+            texte = ("Toutes les photos du dossier ont ete revues.\n\n"
+                     "Fleche gauche : revenir en arriere      Echap : revenir au menu")
+        self.visionneuse.afficher_texte(texte)
         self._mettre_a_jour_barre()
         self.etat["terminee"] = True
-        self.suivi.enregistrer()
+        self._noter_avancement()
+
+    def _photos_restantes(self):
+        """Nombre de photos encore a la racine du dossier source (tri seulement, sinon 0)."""
+        if self.dossier_origine is not None:
+            return 0
+        return len(photos_du_dossier(self.suivi.dossier_source))
+
+    def _repasser_les_restantes(self):
+        """Ferme la fenetre pour en rouvrir une sur les seules photos restantes.
+
+        Les photos revenues dans le dossier source apres avoir ete rangees
+        sont d'abord signalees, avec la proposition de les remettre en place
+        (voir remise_en_place.py). La nouvelle fenetre est ouverte par
+        tri.lancer_tri, qui refait la liste a partir du dossier source.
+        """
+        if self.ecritures.en_cours():
+            self._attendre_les_enregistrements(self._repasser_les_restantes)
+            return
+        proposer_de_remettre_en_place(self.fenetre, self.suivi)
+        self.recommencer = True
+        self.quitter()
 
     # ------------------------------------------------------------------
     # Mode barrer
@@ -450,9 +562,9 @@ class FenetreRangement:
             if self.visionneuse.image is not None and self.position < len(self.photos):
                 self.detection.avancer(self.position)
                 self._donner_les_visages_des_que_prets(self.position)
-        self.suivi.enregistrer()
         self._mettre_a_jour_rappel()
         self._mettre_a_jour_barre()
+        self._noter_avancement()
 
     def _activer_barrage(self):
         """Lance la detection des visages et confie les clics a l'outil bandeaux.
@@ -502,6 +614,12 @@ class FenetreRangement:
     def _touche(self, evenement):
         touche = evenement.keysym
 
+        # Fenetre en train de se fermer, ou action en attente de la fin d'un
+        # enregistrement : les touches sont ignorees, sans quoi elles
+        # s'appliqueraient a une photo qui n'est pas encore celle qu'on attend.
+        if self.en_fermeture or self.attente_enregistrement is not None:
+            return "break"
+
         # Pendant le rognage, seules trois touches comptent : rien d'autre ne
         # doit deplacer ou changer la photo tant que le cadre est a l'ecran.
         if self.visionneuse.en_rognage:
@@ -516,7 +634,10 @@ class FenetreRangement:
         elif touche == "Tab":
             self.basculer_barrage()
         elif touche in ("Return", "KP_Enter"):
-            self.valider()
+            if self.position >= len(self.photos) and self._photos_restantes():
+                self._repasser_les_restantes()
+            else:
+                self.valider()
         # Les touches du pave numerique portent un autre nom quand le verrouillage
         # numerique est desactive : « KP_Right » au lieu de « Right ».
         elif touche in ("space", "Right", "KP_Right"):
@@ -530,13 +651,53 @@ class FenetreRangement:
             self._mettre_a_jour_barre()
         elif touche.lower() == "c":
             self.commencer_rognage()
-        elif evenement.char and self.touches_de_tri:
-            nom_dossier = self.suivi.dossier_tri_pour_touche(evenement.char)
-            if nom_dossier:
-                self.ranger(nom_dossier)
+        elif (touche.lower() == "n" and self.touches_de_tri
+              and not self.suivi.dossier_tri_pour_touche("n")):
+            # Un evenement cree avant l'arrivee de cette touche peut avoir un
+            # dossier range par N : la touche continue alors de ranger.
+            self.creer_dossier()
+        elif self.touches_de_tri:
+            # Le caractere exact d'abord, puis le chiffre de la meme touche sur
+            # un clavier AZERTY (voir touches.py).
+            for caractere in touches.caracteres_de_la_touche(evenement):
+                nom_dossier = self.suivi.dossier_tri_pour_touche(caractere)
+                if nom_dossier:
+                    self.ranger(nom_dossier)
+                    break
         # « break » empeche Tk de traiter la touche a sa facon : sans cela, Tab
         # deplacerait le focus du clavier hors de la fenetre.
         return "break"
+
+    def creer_dossier(self):
+        """Cree un nouveau dossier de tri sans quitter le tri (touche N).
+
+        La boite demande son nom et sa touche. Le dossier est cree aussitot,
+        ajoute a l'evenement et retenu pour les prochains evenements
+        (decision de l'utilisateur, 26 octobre 2026). La photo affichee ne
+        bouge pas : il suffit d'appuyer ensuite sur la touche du nouveau
+        dossier pour l'y ranger.
+        """
+        nouveau = demander_nouveau_dossier(self.fenetre, self.suivi)
+        # La boite fermee laisse derriere elle des objets Tkinter qui se
+        # referencent les uns les autres : ils sont detruits ici, sur le fil
+        # principal, et non plus tard par le ramasse-miettes depuis un fil
+        # d'arriere-plan (voir __init__).
+        gc.collect()
+        self.fenetre.focus_force()
+        if nouveau is None:
+            return
+        try:
+            os.makedirs(self.suivi.chemin_dossier(nouveau["nom"]), exist_ok=True)
+        except OSError as erreur:
+            messagebox.showerror("Dossier impossible a creer",
+                                 "Le dossier « %s » n'a pas pu etre cree :\n%s"
+                                 % (nouveau["nom"], erreur), parent=self.fenetre)
+            self.fenetre.focus_force()
+            return
+        self.suivi.ajouter_dossier_tri(nouveau["nom"], nouveau["touche"])
+        preferences.retenir_dossiers_de_tri(self.suivi.dossiers_tri)
+        self._mettre_a_jour_rappel()
+        self._noter_avancement()
 
     # ------------------------------------------------------------------
     # Retouches : rotation et bandeaux
@@ -554,7 +715,9 @@ class FenetreRangement:
         qu'un retour avec la fleche gauche la montre bien telle qu'elle sera
         enregistree. Les visages, eux, devront etre detectes de nouveau.
 
-        Renvoie (chemin de la sauvegarde, bandeaux, rotation).
+        Renvoie (chemin de la sauvegarde, bandeaux, rotation), ou None si la
+        copie de sauvegarde n'a pas pu etre faite : la photo n'est alors pas
+        modifiee, et l'utilisateur en est prevenu.
         """
         bandeaux = self.outil.bandeaux()
         rotation = self.visionneuse.rotation
@@ -563,7 +726,9 @@ class FenetreRangement:
         # (section 9.6). Si un rognage de cette photo est encore en cours
         # d'enregistrement, la copie attend la version a jour.
         self.ecritures.attendre(chemin)
-        sauvegarde = copie_de_sauvegarde(chemin, self.suivi.chemin_dossier_temporaire())
+        sauvegarde = self._copie_de_sauvegarde(chemin)
+        if sauvegarde is None:
+            return None
 
         image = self.visionneuse.image
         apercu = self.visionneuse.apercu
@@ -573,6 +738,24 @@ class FenetreRangement:
         self.chargeur.remplacer(self.position, image_retouchee, apercu_retouche)
         self._oublier_les_visages(self.position)
         return sauvegarde, bandeaux, rotation
+
+    def _copie_de_sauvegarde(self, chemin):
+        """Copie intacte de la photo avant modification, ou None (l'utilisateur est prevenu).
+
+        Sans copie, pas d'annulation possible : la photo ne doit donc pas etre
+        modifiee. Un echec (disque plein, dossier en lecture seule) arretait
+        sinon l'action a mi-chemin, sur un message d'erreur imprevue.
+        """
+        try:
+            return copie_de_sauvegarde(chemin, self.suivi.chemin_dossier_temporaire())
+        except OSError as erreur:
+            messagebox.showerror(
+                "Modification impossible",
+                "La copie de sauvegarde de « %s » n'a pas pu etre faite :\n%s\n\n"
+                "La photo n'a pas ete modifiee." % (os.path.basename(chemin), erreur),
+                parent=self.fenetre)
+            self.fenetre.focus_force()
+            return None
 
     def valider(self):
         """Enregistre les retouches de la photo sur place, puis passe a la suivante.
@@ -585,12 +768,20 @@ class FenetreRangement:
         nom_fichier = self.photos[self.position]
         dossier_actuel, chemin = self._localiser(nom_fichier)
         if chemin is not None and self._retouches_en_attente():
+            if self.ecritures.en_cours(chemin):
+                # Un rognage de cette photo s'enregistre encore : on attend sa
+                # fin sans figer la fenetre.
+                self._attendre_les_enregistrements(self.valider)
+                return
             if not self._verifier_que_la_photo_est_modifiable():
                 # Format que l'on ne sait pas reecrire sans perte : les
                 # retouches sont abandonnees, la photo n'est pas touchee.
                 self.suivante()
                 return
-            sauvegarde, bandeaux, rotation = self._preparer_retouches(chemin)
+            preparees = self._preparer_retouches(chemin)
+            if preparees is None:
+                return      # on reste sur la photo, retouches toujours a l'ecran
+            sauvegarde, bandeaux, rotation = preparees
             self.ecritures.ajouter(chemin, enregistrer_retouches, chemin, bandeaux, rotation)
             self.etat["historique"].append({
                 "action": "retouche",
@@ -610,41 +801,54 @@ class FenetreRangement:
         barree. Si une version sans barre existe deja (photo barree une seconde
         fois), elle est gardee : c'est elle qui n'a aucun bandeau.
 
-        Renvoie le chemin de la copie creee, ou None si rien n'a ete cree.
+        Renvoie le chemin de la copie creee, ou None si rien n'a ete cree. Un
+        echec ne doit pas interrompre la validation, deja en cours
+        d'enregistrement : on previent, et la photo barree est gardee seule.
         """
         copie = chemin_sans_barre(chemin)
         if not bandeaux or os.path.exists(copie):
             return None
-        os.makedirs(os.path.dirname(copie), exist_ok=True)
-        shutil.copy2(sauvegarde, copie)
+        try:
+            os.makedirs(os.path.dirname(copie), exist_ok=True)
+            shutil.copy2(sauvegarde, copie)
+        except OSError as erreur:
+            messagebox.showwarning(
+                "Version sans barre non creee",
+                "La version sans bandeaux de « %s » n'a pas pu etre creee :\n%s\n\n"
+                "La photo barree est bien enregistree ; Retour arriere la rend "
+                "intacte." % (os.path.basename(chemin), erreur), parent=self.fenetre)
+            self.fenetre.focus_force()
+            return None
         if rotation:
             self.ecritures.ajouter(copie, tourner_sans_barre, copie, rotation)
         return copie
 
     def _deplacer_sans_barre(self, ancien_chemin, nouveau_chemin):
-        """Deplace la version sans bandeaux d'une photo, si elle en a une, avec elle."""
-        depart = chemin_sans_barre(ancien_chemin)
-        arrivee = chemin_sans_barre(nouveau_chemin)
-        if not os.path.isfile(depart) or os.path.exists(arrivee):
-            return
-        self.ecritures.attendre(depart)
-        os.makedirs(os.path.dirname(arrivee), exist_ok=True)
-        shutil.move(depart, arrivee)
-        self._effacer_si_vide(os.path.dirname(depart))
+        """Deplace la version sans bandeaux d'une photo, si elle en a une, avec elle.
+
+        Un echec ici ne doit pas faire croire que la photo n'a pas ete rangee :
+        elle l'a ete. On previent, et la version sans barre reste ou elle est.
+        """
+        self.ecritures.attendre(chemin_sans_barre(ancien_chemin))
+        try:
+            deplacer_sans_barre(ancien_chemin, nouveau_chemin)
+        except OSError as erreur:
+            messagebox.showwarning(
+                "Version sans barre non deplacee",
+                "La photo « %s » a bien ete deplacee, mais pas sa version sans "
+                "bandeaux, restee dans « %s » :\n%s"
+                % (os.path.basename(ancien_chemin),
+                   os.path.dirname(chemin_sans_barre(ancien_chemin)), erreur),
+                parent=self.fenetre)
+            self.fenetre.focus_force()
 
     def _retirer_sans_barre(self, action):
         """Efface la version sans bandeaux creee par une action que l'on annule."""
         copie = action.get("sans_barre")
         if copie and os.path.isfile(copie):
-            os.remove(copie)
-            self._effacer_si_vide(os.path.dirname(copie))
-
-    def _effacer_si_vide(self, dossier):
-        """Supprime un dossier « Sans-barre » devenu vide."""
-        try:
-            os.rmdir(dossier)       # echoue sans rien effacer s'il reste un fichier
-        except OSError:
-            pass
+            self.ecritures.attendre(copie)
+            supprimer_fichier(copie)
+            effacer_si_vide(os.path.dirname(copie))
 
     # ------------------------------------------------------------------
     # Rangement et navigation
@@ -659,6 +863,12 @@ class FenetreRangement:
         if self.position >= len(self.photos):
             return
 
+        # Photo encore sur « Chargement... » : on ne range pas ce qu'on n'a pas
+        # vu. Une touche maintenue enfoncee, ou un disque lent, rangeaient
+        # sinon des photos jamais affichees.
+        if self.attente is not None:
+            return
+
         nom_fichier = self.photos[self.position]
         dossier_actuel, chemin = self._localiser(nom_fichier)
         if chemin is None or dossier_actuel == nom_dossier:
@@ -667,8 +877,17 @@ class FenetreRangement:
             self.valider()
             return
 
+        # Si la photo vient d'etre rognee ou retouchee, son enregistrement (ou
+        # celui de sa version sans barre) peut etre encore en cours : on attend
+        # qu'il soit fini avant de la comparer ou de la deplacer, sans figer
+        # la fenetre.
+        if self.ecritures.en_cours(chemin) or self.ecritures.en_cours(chemin_sans_barre(chemin)):
+            self._attendre_les_enregistrements(lambda: self.ranger(nom_dossier))
+            return
+
         destination = os.path.join(self.suivi.chemin_dossier(nom_dossier), nom_fichier)
-        if os.path.exists(destination):
+        doublon = os.path.exists(destination)
+        if doublon and not filecmp.cmp(chemin, destination, shallow=False):
             # Ne jamais ecraser une photo : on previent et on laisse tout en place.
             messagebox.showwarning(
                 "Deplacement impossible",
@@ -678,60 +897,158 @@ class FenetreRangement:
             self.fenetre.focus_force()
             return
 
-        sauvegarde = None
-        retouches = None
         # Le rangement d'une photo au format non modifiable se fait quand meme :
         # la deplacer ne l'altere pas. Seules ses retouches sont abandonnees,
         # apres avoir prevenu.
-        if self._retouches_en_attente() and self._verifier_que_la_photo_est_modifiable():
-            sauvegarde, bandeaux, rotation = self._preparer_retouches(chemin)
-            retouches = (bandeaux, rotation)
+        garder_retouches = (self._retouches_en_attente()
+                            and self._verifier_que_la_photo_est_modifiable())
 
-        # Si la photo vient d'etre rognee, son enregistrement peut etre encore
-        # en cours : on attend qu'il soit fini avant de la deplacer.
-        self.ecritures.attendre(chemin)
-        os.makedirs(os.path.dirname(destination), exist_ok=True)
-        shutil.move(chemin, destination)
-        self.chargeur.changer_chemin(self.position, destination)
-        # Une version sans bandeaux gardee auparavant suit la photo.
-        self._deplacer_sans_barre(chemin, destination)
-        # Les retouches sont enregistrees a la nouvelle place, en arriere-plan :
-        # la fenetre n'attend pas la fin de l'encodage pour passer a la suite.
-        sans_barre = None
-        if retouches is not None:
-            self.ecritures.ajouter(destination, enregistrer_retouches, destination, *retouches)
-            sans_barre = self._garder_sans_barre(sauvegarde, destination, *retouches)
+        if not self._deplacer_la_photo(chemin, destination, doublon):
+            return
 
         # L'historique permet d'annuler plusieurs actions de suite. Le dossier
         # de depart y est note, car en revue (ou apres un retour en arriere)
         # ce n'est pas forcement le dossier source. La sauvegarde, s'il y en
         # a une, permet d'annuler les retouches en meme temps que le rangement.
-        self.etat["historique"].append({
+        # Le rangement y est inscrit des que la photo a bouge : quoi qu'il
+        # arrive ensuite, il doit pouvoir etre annule.
+        action = {
             "action": "deplacement",
             "fichier": nom_fichier,
             "depuis": dossier_actuel,
             "dossier": nom_dossier,
-            "sauvegarde": sauvegarde,
-            "sans_barre": sans_barre,
+            "sauvegarde": None,
+            "sans_barre": None,
             "index": self.position,
-        })
+        }
+        self.etat["historique"].append(action)
+        self.chargeur.changer_chemin(self.position, destination)
+        # Le choix est retenu dans le suivi, independamment du disque : c'est
+        # ce qui permet de reperer ensuite une photo que la synchronisation
+        # aurait remise dans le dossier source (voir remise_en_place.py).
+        self.suivi.noter_rangement(nom_fichier, nom_dossier)
+        # Une version sans bandeaux gardee auparavant suit la photo.
+        self._deplacer_sans_barre(chemin, destination)
+
+        # Les retouches ne sont preparees qu'une fois la photo a sa nouvelle
+        # place : si le deplacement avait echoue, rien ne devait changer. Elles
+        # sont enregistrees en arriere-plan : la fenetre n'attend pas la fin de
+        # l'encodage pour passer a la suite.
+        if garder_retouches:
+            preparees = self._preparer_retouches(destination)
+            if preparees is not None:
+                sauvegarde, bandeaux, rotation = preparees
+                self.ecritures.ajouter(destination, enregistrer_retouches, destination,
+                                       bandeaux, rotation)
+                action["sauvegarde"] = sauvegarde
+                action["sans_barre"] = self._garder_sans_barre(sauvegarde, destination,
+                                                               bandeaux, rotation)
         self.position += 1
-        self.suivi.enregistrer()
         self.afficher_photo_courante()
+        self._noter_avancement()
+
+    def _deplacer_la_photo(self, chemin, destination, doublon):
+        """Deplace la photo vers son dossier de tri. Renvoie False en cas d'echec.
+
+        `doublon` signale qu'une copie identique, octet pour octet, se trouve
+        deja a destination. C'est la trace d'un rangement interrompu par une
+        version precedente du logiciel, ou d'une synchronisation qui a recopie
+        la photo dans le dossier source. Il suffit alors d'effacer
+        l'exemplaire du dossier source : rien n'est perdu, l'autre etant
+        identique.
+
+        En cas d'echec, la photo reste exactement ou elle etait, et l'on
+        reste sur elle : l'utilisateur peut simplement rappuyer sur la touche.
+        """
+        try:
+            if doublon:
+                supprimer_fichier(chemin)
+            else:
+                os.makedirs(os.path.dirname(destination), exist_ok=True)
+                deplacer_fichier(chemin, destination)
+        except OSError as erreur:
+            messagebox.showerror(
+                "Deplacement impossible",
+                "La photo « %s » n'a pas pu etre deplacee :\n%s\n\n"
+                "Elle est restee a sa place. Un autre programme l'utilise "
+                "peut-etre ; rappuyez sur la touche pour reessayer."
+                % (os.path.basename(chemin), erreur),
+                parent=self.fenetre)
+            self.fenetre.focus_force()
+            return False
+        return True
 
     def suivante(self):
         """Passe a la photo suivante sans rien deplacer (section 8.2)."""
         if self.position < len(self.photos):
             self.position += 1
-            self.suivi.enregistrer()
             self.afficher_photo_courante()
+            self._noter_avancement()
 
     def precedente(self):
         """Revient a la photo precedente sans rien deplacer."""
         if self.position > 0:
             self.position -= 1
-            self.suivi.enregistrer()
             self.afficher_photo_courante()
+            self._noter_avancement()
+
+    def _noter_avancement(self):
+        """Enregistre le suivi ; un echec previent, sans interrompre l'action.
+
+        L'ecriture du suivi reessaie deja deux secondes si un autre programme
+        le tient ouvert (OneDrive, l'antivirus : voir fichiers.ecrire_json).
+        Si elle echoue encore, l'action, elle, a bien eu lieu : on previent une
+        seule fois, et le suivi sera enregistre a l'action suivante, avec tout
+        ce qui s'est passe entre-temps.
+
+        Avant, l'erreur interrompait l'action entre le changement de position
+        et l'affichage : l'ecran montrait encore une photo alors que la
+        position designait la suivante, et la touche de tri d'apres rangeait
+        une photo jamais vue, laissant l'autre dans le dossier source.
+        """
+        try:
+            self.suivi.enregistrer()
+        except OSError as erreur:
+            if not self.avancement_en_echec:
+                self.avancement_en_echec = True
+                messagebox.showwarning(
+                    "Avancement non enregistre",
+                    "Le fichier de suivi n'a pas pu etre enregistre :\n%s\n\n"
+                    "Vous pouvez continuer : il le sera a la prochaine action. "
+                    "Un autre programme l'utilise peut-etre (synchronisation, "
+                    "antivirus)." % erreur, parent=self.fenetre)
+                self.fenetre.focus_force()
+            return
+        self.avancement_en_echec = False
+
+    def _attendre_les_enregistrements(self, action, chemin=None):
+        """Lance `action` des que les enregistrements en cours sont termines.
+
+        Une photo HEIC met trois a quatre secondes a s'enregistrer. Annuler,
+        ranger ou fermer juste apres l'avoir validee obligeait a attendre la
+        fin de son enregistrement, fenetre figee, et Windows la declarait
+        « ne repond pas ». On revient donc voir toutes les 50 ms ; d'ici la,
+        les touches sont ignorees (voir _touche) et un message dit pourquoi.
+        """
+        self._attendre_puis(action, chemin, None)
+
+    def _attendre_puis(self, action, chemin, texte_avant):
+        """Un tour d'attente de _attendre_les_enregistrements ; remet le texte d'avant a la fin."""
+        self.attente_enregistrement = None
+        if self.ecritures.en_cours(chemin):
+            if texte_avant is None:
+                texte_avant = self.etiquette_avancement.cget("text")
+                self.etiquette_avancement.config(text="Enregistrement en cours, un instant...")
+            self.attente_enregistrement = self.fenetre.after(
+                50, self._attendre_puis, action, chemin, texte_avant)
+            return
+        if texte_avant is not None:
+            self.etiquette_avancement.config(text=texte_avant)
+        # L'enregistrement attendu a pu echouer : l'action visait alors une
+        # image qui n'est pas celle du fichier, et n'a plus lieu d'etre.
+        if self._traiter_les_echecs():
+            return
+        action()
 
     # ------------------------------------------------------------------
     # Rognage
@@ -760,14 +1077,15 @@ class FenetreRangement:
         photo en silence.
         """
         nom_fichier = self.photos[self.position]
-        if est_modifiable(nom_fichier):
+        _, chemin = self._localiser(nom_fichier)
+        if est_modifiable(chemin or nom_fichier):
             return True
         messagebox.showwarning(
             "Format non modifiable",
             "La photo « %s » peut etre triee, mais pas modifiee : son format ne "
             "peut pas etre reenregistre sans perte de qualite.\n\n"
             "Seuls les formats JPEG, PNG, HEIC et WEBP sont rognables et "
-            "censurables." % nom_fichier,
+            "censurables, et pas les images animees." % nom_fichier,
             parent=self.fenetre)
         self.fenetre.focus_force()
         return False
@@ -798,12 +1116,16 @@ class FenetreRangement:
             self.abandonner_rognage()
             return
 
-        rotation = self.visionneuse.rotation
         # La copie de sauvegarde doit etre prise sur le fichier a jour : si un
         # rognage precedent de cette photo est encore en cours d'enregistrement,
-        # on l'attend.
-        self.ecritures.attendre(chemin)
-        sauvegarde = copie_de_sauvegarde(chemin, self.suivi.chemin_dossier_temporaire())
+        # on attend sa fin, sans figer la fenetre.
+        if self.ecritures.en_cours(chemin):
+            self._attendre_les_enregistrements(self.rogner)
+            return
+        rotation = self.visionneuse.rotation
+        sauvegarde = self._copie_de_sauvegarde(chemin)
+        if sauvegarde is None:
+            return      # on reste en rognage : Entree reessaie, Echap abandonne
         self.ecritures.ajouter(chemin, rogner_fichier, chemin, cadre, rotation)
 
         self.etat["historique"].append({
@@ -813,7 +1135,6 @@ class FenetreRangement:
             "sauvegarde": sauvegarde,
             "index": self.position,
         })
-        self.suivi.enregistrer()
 
         # A l'ecran, le meme rognage est applique a la photo deja en memoire,
         # qui remplace l'ancienne version dans le cache.
@@ -830,35 +1151,70 @@ class FenetreRangement:
                                  garder_rotation=True)
         self._mettre_a_jour_rappel()
         self._mettre_a_jour_barre()
+        self._noter_avancement()
 
     # ------------------------------------------------------------------
     # Annulation
     # ------------------------------------------------------------------
 
     def annuler(self):
-        """Annule la derniere action (rangement, retouche ou rognage) et reaffiche la photo."""
+        """Annule la derniere action (rangement, retouche ou rognage) et reaffiche la photo.
+
+        L'action ne quitte l'historique qu'une fois annulee. Si un fichier
+        refuse de bouger (photo ouverte dans un autre programme, OneDrive...),
+        l'utilisateur est prevenu et l'action reste en place : rappuyer sur
+        Retour arriere reprend la ou l'on s'etait arrete. Auparavant, elle
+        etait retiree d'abord : apres un echec, elle etait perdue, et le
+        second appui annulait l'action d'avant, sur une autre photo ; une
+        photo pivotee le restait alors pour de bon.
+        """
         historique = self.etat["historique"]
         if not historique:
             return
 
         # Les enregistrements en cours doivent etre termines avant de deplacer
-        # ou de remettre en place un fichier.
-        self.ecritures.attendre()
+        # ou de remettre en place un fichier ; on attend sans figer la fenetre.
+        if self.ecritures.en_cours():
+            self._attendre_les_enregistrements(self.annuler)
+            return
 
-        derniere = historique.pop()
-        if derniere.get("action") in ("rognage", "retouche"):
-            self._remettre_la_sauvegarde(derniere)
-            self._retirer_sans_barre(derniere)
-        else:
-            self._annuler_deplacement(derniere)
+        derniere = historique[-1]
+        try:
+            if derniere.get("action") in ("rognage", "retouche"):
+                self._remettre_la_sauvegarde(derniere)
+                self._retirer_sans_barre(derniere)
+            else:
+                self._annuler_deplacement(derniere)
+        except OSError as erreur:
+            messagebox.showerror(
+                "Annulation impossible",
+                "L'annulation de la derniere action sur « %s » n'a pas pu aller "
+                "jusqu'au bout :\n%s\n\n"
+                "Rien n'est perdu. Un autre programme utilise peut-etre le fichier ; "
+                "rappuyez sur Retour arriere pour reessayer."
+                % (derniere["fichier"], erreur), parent=self.fenetre)
+            self.fenetre.focus_force()
+            # Une partie de l'annulation a pu avoir lieu : l'ecran et le suivi
+            # doivent dire ce qui est reellement sur le disque. Sinon, l'ecran
+            # pouvait montrer un bandeau qui n'etait plus dans le fichier.
+            if derniere["index"] == self.position:
+                self.afficher_photo_courante()
+            self._noter_avancement()
+            return
 
+        historique.pop()
         self.position = derniere["index"]
         self.etat["terminee"] = False
-        self.suivi.enregistrer()
         self.afficher_photo_courante()
+        self._noter_avancement()
 
     def _annuler_deplacement(self, deplacement):
-        """Ramene la photo dans le dossier d'ou elle venait, sans ses retouches."""
+        """Ramene la photo dans le dossier d'ou elle venait, sans ses retouches.
+
+        Peut lever OSError (fichier occupe) : l'action reste alors dans
+        l'historique, et le prochain appui reprend ou l'on s'etait arrete.
+        `ramenee` note que la photo elle-meme est deja revenue.
+        """
         nom_fichier = deplacement["fichier"]
         # Les historiques ecrits par une version precedente ne notaient pas le
         # dossier de depart : c'etait alors toujours le dossier source (None).
@@ -867,26 +1223,54 @@ class FenetreRangement:
                                      nom_fichier)
         chemin_retour = os.path.join(self._chemin_du_dossier(depuis), nom_fichier)
 
-        if os.path.isfile(chemin_actuel) and not os.path.exists(chemin_retour):
-            shutil.move(chemin_actuel, chemin_retour)
+        if not deplacement.get("ramenee"):
+            # L'annulation ne doit jamais echouer en silence : l'utilisateur
+            # croirait la photo revenue alors qu'elle n'a pas bouge. Comme rien
+            # n'y changera en rappuyant, l'action quitte tout de meme
+            # l'historique : les actions precedentes restent ainsi annulables.
+            if not os.path.isfile(chemin_actuel) or os.path.exists(chemin_retour):
+                raison = ("elle n'est plus dans « %s »" % deplacement["dossier"]
+                          if not os.path.isfile(chemin_actuel)
+                          else "un fichier du meme nom occupe deja sa place d'origine")
+                messagebox.showwarning("Annulation impossible",
+                                       "La photo « %s » n'a pas pu etre ramenee : %s."
+                                       % (nom_fichier, raison), parent=self.fenetre)
+                self.fenetre.focus_force()
+                return
+            deplacer_fichier(chemin_actuel, chemin_retour)
+            deplacement["ramenee"] = True
             self.chargeur.changer_chemin(deplacement["index"], chemin_retour)
-            # La version sans bandeaux creee par ce rangement disparait avec
-            # ses bandeaux ; une version plus ancienne revient avec la photo.
-            self._retirer_sans_barre(deplacement)
-            self._deplacer_sans_barre(chemin_actuel, chemin_retour)
-            sauvegarde = deplacement.get("sauvegarde")
-            if sauvegarde and os.path.isfile(sauvegarde):
-                os.replace(sauvegarde, chemin_retour)
-                self.chargeur.oublier(deplacement["index"])
-                self._oublier_les_visages(deplacement["index"])
+            self.suivi.noter_rangement(
+                nom_fichier, depuis if depuis in self.suivi.noms_dossiers_tri else None)
+
+        # La copie intacte est remise avant tout le reste : c'est elle qui
+        # compte. La version sans barre n'en est qu'une copie, qui n'est
+        # effacee qu'une fois l'originale revenue.
+        sauvegarde = deplacement.get("sauvegarde")
+        if sauvegarde and os.path.isfile(sauvegarde):
+            remplacer_fichier(sauvegarde, chemin_retour)
+            self.chargeur.oublier(deplacement["index"])
+            self._oublier_les_visages(deplacement["index"])
+        # La version sans bandeaux creee par ce rangement disparait avec ses
+        # bandeaux ; une version plus ancienne revient avec la photo.
+        self._retirer_sans_barre(deplacement)
+        self._deplacer_sans_barre(chemin_actuel, chemin_retour)
 
     def _remettre_la_sauvegarde(self, action):
-        """Remet en place la copie intacte gardee avant un rognage ou une retouche."""
+        """Remet en place la copie intacte gardee avant un rognage ou une retouche.
+
+        La copie est remise la ou se trouve la photo maintenant. Une
+        synchronisation a pu la deplacer depuis (la ramener dans le dossier
+        source) : remise a son ancien emplacement, la copie aurait fait un
+        doublon, et la photo serait restee modifiee.
+        """
         sauvegarde = action.get("sauvegarde")
         chemin = os.path.join(self._chemin_du_dossier(action["emplacement"]),
                               action["fichier"])
+        if not os.path.isfile(chemin):
+            chemin = self._localiser(action["fichier"])[1] or chemin
         if sauvegarde and os.path.isfile(sauvegarde):
-            os.replace(sauvegarde, chemin)
+            remplacer_fichier(sauvegarde, chemin)
         # L'image en memoire est la version modifiee : il faut relire l'originale.
         self.chargeur.oublier(action["index"])
         self._oublier_les_visages(action["index"])
@@ -897,8 +1281,29 @@ class FenetreRangement:
 
     def _surveiller_ecritures(self):
         """Verifie regulierement qu'aucun enregistrement en arriere-plan n'a echoue."""
-        signaler_les_echecs(self.ecritures, self.chargeur, self.fenetre)
+        self._traiter_les_echecs()
         self.surveillance = self.fenetre.after(300, self._surveiller_ecritures)
+
+    def _traiter_les_echecs(self):
+        """Previent des enregistrements rates, et reprend la photo affichee si elle en est.
+
+        L'image montree ne correspond alors plus au fichier : apres un rognage
+        rate, l'ecran gardait la photo rognee, et un bandeau pose sur des yeux
+        y etait ecrit au meme endroit du fichier non rogne, a cote des yeux.
+        La photo est donc reaffichee telle qu'elle est sur le disque.
+
+        Renvoie True si la photo affichee a ete reprise.
+        """
+        echecs = signaler_les_echecs(self.ecritures, self.chargeur, self.fenetre)
+        if not echecs or self.position >= len(self.photos):
+            return False
+        _, chemin = self._localiser(self.photos[self.position])
+        if chemin not in echecs:
+            return False
+        if self.visionneuse.en_rognage:
+            self.abandonner_rognage()
+        self.afficher_photo_courante()
+        return True
 
     # ------------------------------------------------------------------
     # Fermeture
@@ -910,16 +1315,43 @@ class FenetreRangement:
         Les retouches provisoires de la photo affichee sont abandonnees, comme
         lorsqu'on passe a une autre photo.
         """
+        if self.en_fermeture:
+            return          # deja en cours (Echap presse deux fois, croix...)
         self.en_fermeture = True
         self._annuler_attente()
         self._annuler_attente_apercus()
-        self.fenetre.after_cancel(self.surveillance)
-        self.visionneuse.arreter()
+        if self.surveillance is not None:
+            self.fenetre.after_cancel(self.surveillance)
+        if self.attente_enregistrement is not None:
+            self.fenetre.after_cancel(self.attente_enregistrement)
+            self.attente_enregistrement = None
 
-        # Les dernieres retouches doivent etre enregistrees avant de fermer, et
-        # avant de vider le dossier des sauvegardes.
-        self.etiquette_avancement.config(text="Enregistrement des dernieres modifications...")
-        self.fenetre.update_idletasks()
+        # Taille de la fenetre, retenue pour la prochaine ouverture. Agrandie,
+        # sa geometrie est celle de l'ecran : seule compte alors l'information
+        # « agrandie », l'ancienne taille normale etant gardee telle quelle.
+        agrandie = theme.est_agrandie(self.fenetre)
+        geometrie = (preferences.fenetre_de_tri()["geometrie"] if agrandie
+                     else self.fenetre.geometry())
+        preferences.retenir_fenetre_de_tri(geometrie, agrandie)
+
+        self.visionneuse.arreter()
+        self._finir_de_quitter()
+
+    def _finir_de_quitter(self):
+        """Attend les derniers enregistrements, sans figer la fenetre, puis la ferme.
+
+        Plusieurs photos HEIC validees a la suite demandent chacune trois a
+        quatre secondes d'enregistrement : la fenetre restait figee tout ce
+        temps, Windows la declarait « ne repond pas », et la fermer de force
+        aurait perdu des retouches validees. Elle dit donc ou elle en est, et
+        revient voir toutes les dixiemes de seconde.
+        """
+        restants = self.ecritures.nombre_en_cours()
+        if restants:
+            self.etiquette_avancement.config(
+                text="Enregistrement des dernieres modifications : %d photo(s)..." % restants)
+            self.fenetre.after(100, self._finir_de_quitter)
+            return
         self.ecritures.arreter()
         signaler_les_echecs(self.ecritures, self.chargeur, self.fenetre)
 
@@ -929,11 +1361,22 @@ class FenetreRangement:
             self.detection.arreter()
         self.chargeur.arreter()
 
+        # Une annulation restee a mi-chemin est terminee tant que la copie
+        # intacte existe encore. Seule la derniere action est concernee : une
+        # plus ancienne designerait un emplacement que la photo a pu quitter.
+        historique = self.etat["historique"]
+        if historique and historique[-1].get("ramenee"):
+            try:
+                self._annuler_deplacement(historique[-1])
+                historique.pop()
+            except OSError:
+                pass
+
         # Les copies de sauvegarde ne servent qu'a l'annulation en cours de
         # session (section 9.6) : elles sont effacees a la fermeture, et les
         # rognages et retouches quittent donc l'historique. Les deplacements,
         # eux, restent annulables a la session suivante, sans leurs retouches.
-        shutil.rmtree(self.suivi.chemin_dossier_temporaire(), ignore_errors=True)
+        self._effacer_les_sauvegardes()
         historique = []
         for action in self.etat["historique"]:
             if action.get("action") in ("rognage", "retouche"):
@@ -945,5 +1388,31 @@ class FenetreRangement:
             action["sans_barre"] = None
             historique.append(action)
         self.etat["historique"] = historique
-        self.suivi.enregistrer()
+        # La fenetre se ferme meme si le suivi ne peut pas etre enregistre
+        # (tenu ouvert par un autre programme) : elle restait sinon a l'ecran,
+        # ses fils deja arretes, photos bloquees sur « Chargement... ».
+        try:
+            self.suivi.enregistrer()
+        except OSError as erreur:
+            messagebox.showwarning(
+                "Avancement non enregistre",
+                "Le fichier de suivi n'a pas pu etre enregistre :\n%s\n\n"
+                "Les photos rangees le restent ; seule la position dans la "
+                "liste pourrait etre perdue." % erreur, parent=self.fenetre)
         self.fenetre.destroy()
+
+    def _effacer_les_sauvegardes(self):
+        """Vide le dossier des copies de sauvegarde, s'il n'est que cela.
+
+        Un evenement cree par une version precedente a pu donner ce nom a l'un
+        de ses dossiers de tri, ou a une copie : le vider aurait efface des
+        photos de l'utilisateur. Le nom est desormais refuse partout ; par
+        prudence, un tel dossier n'est de toute facon jamais vide ici.
+        """
+        dossier = self.suivi.chemin_dossier_temporaire()
+        nom = os.path.basename(dossier).lower()
+        noms_de_l_utilisateur = {autre.lower() for autre in
+                                 self.suivi.noms_dossiers_tri + self.suivi.dossiers_dupliques}
+        if nom in noms_de_l_utilisateur:
+            return
+        shutil.rmtree(dossier, ignore_errors=True)

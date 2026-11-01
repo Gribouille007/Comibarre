@@ -45,3 +45,7 @@ photos_test/
 photos/
 *_progression.json
 progression.json
+
+# --- Préférences de l'utilisateur (dossiers de tri, dernier événement) ---
+preferences.json
+preferences.json.tmp

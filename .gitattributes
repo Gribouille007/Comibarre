@@ -1,0 +1,6 @@
+# Les lanceurs de macOS et de Linux doivent garder des fins de ligne Unix,
+# meme copies depuis Windows : « #!/bin/sh\r » ne s'execute pas. Celui de
+# Windows garde les siennes.
+*.sh       text eol=lf
+*.command  text eol=lf
+*.bat      text eol=crlf

@@ -42,6 +42,14 @@ ACCENT = "#5a9ef8"            # information, element choisi
 ATTENTION = "#ffc861"         # retouche pas encore enregistree
 ALERTE = "#ff7a7a"            # erreur, mode actif qui modifie la photo
 
+# --- Les traits poses sur la photo elle-meme -----------------------------
+# Cadre de rognage, contour et poignees du bandeau choisi : un blanc franc,
+# sur une ombre noire a peine visible, se lit aussi bien sur un ciel clair que
+# sur un costume sombre. La poignee de rotation prend l'accent.
+TRAIT_SUR_PHOTO = "#ffffff"
+OMBRE_SUR_PHOTO = "#000000"
+GRILLE_SUR_PHOTO = "#8f8f8f"  # grille des tiers, pendant le rognage
+
 # Marge interieure commune aux fenetres de reglage : une seule valeur, pour
 # que toutes les fenetres respirent de la meme facon.
 MARGE = 22
@@ -113,6 +121,11 @@ def appliquer(racine):
     style.configure("TSeparator", background=SEPARATEUR)
 
 
+def en_rvb(couleur):
+    """« #5a9ef8 » -> (90, 158, 248), pour les dessins faits avec Pillow."""
+    return tuple(int(couleur[position:position + 2], 16) for position in (1, 3, 5))
+
+
 def habiller(fenetre):
     """Donne le fond du theme a une fenetre. A appeler sur chaque Toplevel.
 
@@ -137,16 +150,49 @@ def centrer(fenetre, parent):
     hauteur = fenetre.winfo_height()
 
     if parent is not None and parent.winfo_viewable() and parent.winfo_width() > 1:
+        # Pas de limite ici : avec deux ecrans, le parent peut se trouver sur
+        # le second, a gauche du premier (x negatif). Ramener la fenetre dans
+        # les limites de l'ecran principal l'envoyait sur l'autre ecran.
         x = parent.winfo_rootx() + (parent.winfo_width() - largeur) // 2
         y = parent.winfo_rooty() + (parent.winfo_height() - hauteur) // 3
     else:
         x = (fenetre.winfo_screenwidth() - largeur) // 2
         y = (fenetre.winfo_screenheight() - hauteur) // 3
-
-    # Une fenetre ne doit jamais se retrouver a cheval sur le bord de l'ecran.
-    x = max(0, min(x, fenetre.winfo_screenwidth() - largeur))
-    y = max(0, min(y, fenetre.winfo_screenheight() - hauteur))
+        # Une fenetre ne doit jamais se retrouver a cheval sur le bord de l'ecran.
+        x = max(0, min(x, fenetre.winfo_screenwidth() - largeur))
+        y = max(0, min(y, fenetre.winfo_screenheight() - hauteur))
     fenetre.geometry("+%d+%d" % (x, y))
+
+
+def agrandir(fenetre):
+    """Agrandit la fenetre a tout l'ecran, barre des taches comprise.
+
+    Windows et macOS l'appellent l'etat « zoomed » ; sous Linux (X11), c'est
+    un attribut de la fenetre. Si ni l'un ni l'autre n'est connu, la fenetre
+    garde simplement sa taille.
+    """
+    try:
+        fenetre.state("zoomed")
+        return
+    except tk.TclError:
+        pass
+    try:
+        fenetre.attributes("-zoomed", True)
+    except tk.TclError:
+        pass
+
+
+def est_agrandie(fenetre):
+    """La fenetre est-elle agrandie a tout l'ecran ? (voir agrandir)"""
+    try:
+        if fenetre.state() == "zoomed":
+            return True
+    except tk.TclError:
+        pass
+    try:
+        return bool(int(fenetre.attributes("-zoomed")))
+    except (tk.TclError, ValueError):
+        return False
 
 
 def demander_texte(parent, titre, question, valeur_initiale=""):

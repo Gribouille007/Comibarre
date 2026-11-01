@@ -1,8 +1,8 @@
 """
 Mode revue - reclasser ou censurer les photos d'un dossier (section 8 bis).
 
-On repasse une a une les photos de l'un des quatre dossiers de tri. Si une
-photo n'est pas a sa place, la touche d'un autre dossier l'y deplace aussitot ;
+On repasse une a une les photos de l'un des dossiers de tri. Si une photo
+n'est pas a sa place, la touche d'un autre dossier l'y deplace aussitot ;
 la touche du dossier revu la laisse ou elle est. Les copies faites depuis le
 menu peuvent aussi etre revues, pour y barrer des yeux : leurs photos n'en
 sortent pas, les touches de tri y sont sans effet.

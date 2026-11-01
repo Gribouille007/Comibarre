@@ -40,18 +40,22 @@ if errorlevel 1 goto telecharger
 
 echo.
 echo Python vient d'etre installe. Fermez cette fenetre, puis relancez
-echo « lancer.bat » : Windows doit d'abord prendre en compte l'installation.
+echo "lancer.bat" : Windows doit d'abord prendre en compte l'installation.
 pause
 exit /b 1
 
 :telecharger
 echo Telechargez Python depuis https://www.python.org/downloads/
-echo Pensez a cocher « Add python.exe to PATH » pendant l'installation.
+echo Pensez a cocher "Add python.exe to PATH" pendant l'installation.
 start "" "https://www.python.org/downloads/"
 pause
 exit /b 1
 
 :lancer
+rem demarrer.py ne fait pas sa propre pause : celle d'ici suffit.
+set LANCEUR_FAIT_UNE_PAUSE=1
 %PYTHON% demarrer.py %*
-if errorlevel 1 pause
+rem "if errorlevel 1" ne voit pas les codes negatifs : un plantage de Python
+rem sous Windows (0xC0000005) en donne un, et la fenetre se fermait sans pause.
+if not "%errorlevel%"=="0" pause
 endlocal

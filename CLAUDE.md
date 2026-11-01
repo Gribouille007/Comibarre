@@ -18,13 +18,22 @@ via une boutique. [3]
 Il rend deux services [4] :
 
 1. **Le tri** — les photos brutes défilent une par une en grand ; une touche du
-   clavier range chaque photo dans l'un de **quatre** dossiers de tri.
+   clavier range chaque photo dans l'un des dossiers de tri. **Leur nombre est
+   libre, de 1 à 12** (décision de l'utilisateur, 26 octobre 2026 ; il en
+   fallait exactement quatre auparavant).
 2. **La censure des yeux** — un clic pose un bandeau noir sur les yeux d'une
    personne, la validation incruste les bandeaux et réenregistre la photo.
 
 S'y ajoute un **mode revue** (ajouté par décision de l'utilisateur, 13 septembre
-2026) : on repasse les photos de l'un des quatre dossiers de tri, et la touche
-d'un autre dossier y déplace aussitôt une photo mal rangée.
+2026) : on repasse les photos de l'un des dossiers de tri, et la touche d'un
+autre dossier y déplace aussitôt une photo mal rangée.
+
+**Le dossier des photos devient le dossier de l'événement** (décision de
+l'utilisateur, 26 octobre 2026) : il est renommé du nom de l'événement, et les
+dossiers de tri, `RAW/`, `Videos/` et `suivi.json` sont créés directement
+dedans. Auparavant, l'événement était un sous-dossier supplémentaire, à son
+nom, placé dans le dossier des photos ; ces événements (suivi « version 1 »)
+se reprennent toujours, sans changer d'organisation (`Suivi.dossier_source`).
 
 **Une seule fenêtre pour tout** (décision de l'utilisateur, 5 octobre 2026) : le
 cahier des charges séparait le tri et la censure en deux étapes successives ;
@@ -102,6 +111,33 @@ OpenCV suffit là où mediapipe imposait 17 paquets supplémentaires.
   deux premiers points donnent directement l'axe du bandeau.
 - **Ne pas appliquer de CLAHE ni de correction de luminosité avant détection** :
   mesuré, le gain est nul voire négatif.
+- **YuNet place mal les yeux d'une tête penchée** (constaté par l'utilisateur,
+  octobre 2026) : il les met presque à l'horizontale, d'autant plus que le
+  visage est petit (il ne rend que 20 % de l'inclinaison réelle sous 100 px de
+  haut), et ne voit plus du tout une tête penchée au-delà d'environ 40°.
+  `visages.py` y remédie en deux temps, sans changer le seuil :
+  1. **passes tournées** : la photo est aussi parcourue tournée de ±45°, à
+     demi-résolution ; un visage trouvé seulement ainsi n'est gardé que si
+     YuNet le retrouve une fois la tête redressée ;
+  2. **redressement** : chaque visage d'au moins 12 px entre les yeux est
+     découpé, mis à 80 px entre les yeux et tourné pour que la tête soit
+     droite, puis détecté de nouveau (au plus 3 fois, jusqu'à moins de 1°).
+  Mesuré sur 23 photos réelles (98 visages de référence, tournées de −90° à
+  +90°) : yeux entièrement couverts dans 94 à 95 % des cas de 0 à 70°, 81 %
+  au-delà (contre 0 à 36 % et 0 % avant), aucun visage perdu sur des foules
+  de 126 et 424 personnes. Coût : 0,15 s par photo en médiane (0,05 s avant),
+  en arrière-plan. Les visages de la photo droite ne s'éliminent jamais entre
+  eux.
+- **Rattachement d'un clic à un visage** (`visage_le_plus_proche`) : sont
+  candidats les visages dont la boîte, élargie d'un quart, contient le clic ;
+  on retient celui dont le milieu des yeux est le plus proche, en tailles de
+  visage. Hors de tout candidat, bandeau manuel. L'ancienne règle (le plus
+  petit visage contenant le clic, ou tout visage à moins d'une taille de son
+  centre) posait le bandeau sur le mauvais visage, ou sur une voisine
+  détectée quand on visait une personne non détectée. Un visage retrouvé sur
+  une image tournée garde une boîte droite **de sa taille propre**, centrée au
+  même endroit : le rectangle englobant la boîte penchée, 1,4 fois plus grand
+  à 45°, captait les clics autour de la tête.
 
 ## 3. Règle de style : la clarté prime [3]
 
@@ -139,7 +175,10 @@ OpenCV suffit là où mediapipe imposait 17 paquets supplémentaires.
   écoute sur un port.
 - **Aucune base de données.** Pas de SQLite, pas d'ORM. L'avancement est
   conservé dans un simple **fichier de suivi placé dans le dossier de
-  l'événement** [10].
+  l'événement** [10]. Ce que le logiciel retient d'une ouverture à l'autre
+  (dossiers de tri, dernier événement, dossier des photos, taille de la
+  fenêtre de tri) tient dans `preferences.json`, à côté du programme
+  (`preferences.py`) : jamais indispensable, ignoré s'il est illisible.
 - **Un seul utilisateur**, **un seul événement traité à la fois**. Aucune notion
   de compte, de session partagée ou de concurrence entre utilisateurs.
 
@@ -159,7 +198,8 @@ La question a été tranchée sur mesures et sur tarifs, pas par principe :
 - **Ce n'est pas plus précis.** YuNet, en local, détecte déjà des visages de
   10 px et fonctionne en photo sous-exposée.
 - **Ce serait plus lent et plus fragile** : 3 000 requêtes réseau, des limites
-  de débit et une panne possible, contre 0,06 s par photo en local.
+  de débit et une panne possible, contre 0,15 s par photo en local (têtes
+  penchées comprises, voir section 2), en arrière-plan.
 
 Si le sujet est rouvert un jour, la seule piste à considérer serait un modèle
 local plus lourd (InsightFace / SCRFD), **pas** une API distante.
@@ -218,6 +258,9 @@ implémentés :
   dossier source. [8.2]
 - **La barre d'espace ne range rien** : la photo passée reste dans le dossier
   source. [8.2]
+- **On ne range pas une photo qu'on n'a pas vue** : une touche de tri pressée
+  pendant « Chargement... » est ignorée. Une touche maintenue enfoncée, ou un
+  disque lent, rangeaient sinon des photos jamais affichées.
 - **Le zoom est purement visuel**. **La rotation peut être enregistrée**
   (décision de l'utilisateur, 5 octobre 2026, à la place de la règle [8.1]) :
   comme les bandeaux, elle reste provisoire jusqu'à **Entrée** (enregistrer
@@ -225,6 +268,70 @@ implémentés :
   flèches et Échap l'abandonnent. Les bandeaux sont mémorisés dans le repère de
   la photo non pivotée : ils sont incrustés d'abord, la photo est pivotée
   ensuite (`retouches.py`), par quart de tour exact, sans recalcul de pixels.
+- **Le tri ne présente que les photos encore dans le dossier source**
+  (décision de l'utilisateur, 16 octobre 2026) : la liste est refaite à chaque
+  ouverture à partir de la racine du dossier source (`tri.preparer_tri`), et
+  l'historique d'annulation du tri repart de zéro. Les photos rangées pendant
+  la session restent dans la liste, pour la flèche gauche.
+- **Aucun objet Tkinter ne doit être détruit hors du fil principal.** Tkinter
+  n'obéit qu'au fil principal : un fil d'arrière-plan qui détruit une image ou
+  une variable Tkinter (via le ramasse-miettes) reste bloqué plus d'une
+  seconde, et, s'il lisait une photo, la garde ouverte, ce qui empêche Windows
+  de la déplacer (mesuré : deux collectes automatiques sur sept tombaient sur
+  un fil d'arrière-plan, et une boîte de saisie fermée suffisait à faire
+  échouer un rangement). D'où **le ramasse-miettes automatique coupé au
+  démarrage** (`gc.disable()` dans `main.main`) et remplacé par une collecte
+  toutes les deux secondes sur le fil principal (`ramasser_les_miettes`),
+  ainsi que la libération des images dans `Visionneuse.arreter`. Ne jamais
+  réactiver le ramasse-miettes automatique. Les déplacements passent par
+  `fichiers.deplacer_fichier` (simple renommage), jamais par `shutil.move`, qui
+  laissait la photo en double quand le déplacement échouait à mi-chemin.
+  Toutes les opérations de `fichiers.py` réessaient deux secondes quand
+  Windows refuse (fichier lu par un autre fil, l'antivirus, OneDrive), et
+  `deplacer_fichier` refuse une destination déjà prise **sur les trois
+  systèmes** (`os.rename` écrase sans rien dire sous macOS et Linux).
+- **Photos revenues dans le dossier source** (problème constaté sur un dossier
+  OneDrive, octobre 2026 : des photos rangées se retrouvaient dans le dossier
+  source, sans aucune erreur ; la synchronisation avait défait leur
+  déplacement après coup). Le suivi retient le dossier choisi pour chaque photo
+  (`Suivi.rangements`, mis à jour à chaque rangement et annulation) ; une photo
+  rangée retrouvée à la racine du dossier source est signalée à l'ouverture du
+  tri et à l'écran de fin, avec la proposition de la remettre en place
+  (`remise_en_place.py`). Un dossier synchronisé est signalé à la
+  configuration, à la fin de la préparation et dans le menu
+  (`synchronisation.py`), avec le conseil de suspendre la synchronisation.
+- **L'écran de fin du tri dit combien de photos restent** dans le dossier
+  source ; Entrée les fait repasser aussitôt (une nouvelle fenêtre s'ouvre sur
+  la liste refaite, voir `tri.lancer_tri`).
+- **Un fichier bloqué n'interrompt jamais une action à mi-chemin** (fichiers
+  tenus par OneDrive ou l'antivirus, constaté par les essais) :
+  - le suivi qui ne s'enregistre pas ne fait que prévenir, une fois
+    (`_noter_avancement`) ; l'écran est mis à jour avant l'enregistrement.
+    Auparavant, l'erreur laissait l'écran sur une photo alors que la position
+    désignait la suivante, et la touche d'après rangeait une photo jamais vue :
+    l'un des chemins qui laissaient des photos dans le dossier source ;
+  - **l'annulation ne retire l'action de l'historique qu'une fois faite** ;
+    un échec prévient et laisse l'action en place, et un nouvel appui reprend
+    où l'on s'était arrêté (`ramenee`). La copie intacte est remise avant
+    d'effacer la version sans barre. Après un échec à mi-chemin, l'écran et le
+    suivi sont remis à jour, et fermer la fenêtre termine l'annulation tant
+    que la copie intacte existe ;
+  - **un enregistrement en arrière-plan raté fait reprendre la photo
+    affichée telle qu'elle est sur le disque** (`_traiter_les_echecs`) : après
+    un rognage raté, l'écran gardait la photo rognée, et un bandeau posé sur
+    des yeux tombait à côté d'eux dans le fichier. L'action qui attendait cet
+    enregistrement est abandonnée ;
+  - un rangement est inscrit dans l'historique dès que la photo a bougé ;
+    une copie de sauvegarde ou une version sans barre impossible à faire
+    prévient sans laisser d'état à moitié fait ;
+  - Échap ferme la fenêtre même si le suivi ne s'enregistre pas, et une
+    fenêtre à moitié construite est refermée avec ses fils.
+- **La fenêtre ne se fige jamais en attendant un enregistrement** : ranger,
+  annuler, rogner ou valider une photo encore en cours d'enregistrement (un
+  HEIC prend 3 à 4 s), ou fermer la fenêtre, revient voir toutes les 50 ms
+  (`_attendre_les_enregistrements`, `_finir_de_quitter`) ; les touches sont
+  ignorées d'ici là. N'appeler `ecritures.attendre()` depuis la fenêtre que
+  pour une attente forcément brève.
 - **Les flèches gauche et droite ne font que naviguer**, dans toutes les étapes :
   elles ne déplacent, ne modifient ni n'enregistrent aucune photo (seule la
   position est notée dans le suivi). Au tri et en revue, une photo déjà rangée
@@ -241,20 +348,49 @@ implémentés :
   Pendant le rognage, **seules Entrée, Échap et C agissent** ; la photo est
   montrée entière, avec une marge tout autour pour que ses bords restent
   saisissables à la souris.
-- **Mode revue** : ne revoit et ne déplace que vers les quatre dossiers de tri ;
+- **Mode revue** : ne revoit et ne déplace que vers les dossiers de tri ;
   la touche du dossier revu laisse la photo en place. **Aucun déplacement
   n'écrase un fichier** portant déjà le même nom.
+- **Dossiers de tri** (décision de l'utilisateur, 26 octobre 2026) : de 1 à 12,
+  ajoutés ou retirés à la configuration (`editeur_dossiers.py`), avec les
+  mêmes règles partout (`dossiers_tri.py`) : noms valides sur les trois
+  systèmes (pas de `CON`, `NUL`… ni de point final), distincts, différents des
+  dossiers du logiciel (`RAW`, `Videos`, `Sans-barre`,
+  `_sauvegardes_temporaires`) ; touches d'un caractère, distinctes, différentes
+  des touches réservées **R, C et N**. **La liste est retenue** d'une ouverture à
+  l'autre (`preferences.py`).
+- **Touche N pendant le tri et la revue** : crée un nouveau dossier de tri (nom
+  et touche demandés), ajouté à l'événement et retenu pour les prochains. La
+  photo affichée **ne bouge pas** : on la range ensuite avec la touche du
+  nouveau dossier (choix de l'utilisateur). Un événement plus ancien dont un
+  dossier se range par N garde ce comportement.
+- **Gestion des dossiers depuis le menu** : renommer (sur le disque, et partout
+  où le suivi cite le dossier), changer de touche, ajouter, retirer. **Un
+  dossier qui contient encore des fichiers ne peut pas être retiré** (choix de
+  l'utilisateur) ; retiré, un dossier vide est supprimé du disque. Échanger
+  deux noms d'un coup est refusé : il faut passer par un nom provisoire.
+- **Touches de tri sur un clavier AZERTY** : la rangée des chiffres donne
+  `& é " '…` sans Majuscule. Une touche de tri « 1 » répond aussi à la touche
+  marquée 1 sans Majuscule (`touches.py`) ; le caractère exact reste
+  prioritaire.
 - **Bords du bandeau lissés** (suréchantillonnage ×4 puis réduction) : un bandeau
   incliné ne doit pas présenter de marches d'escalier. L'intérieur reste
   entièrement noir, et le rendu à l'écran est identique à celui du fichier.
 - **Renommage** : numérotation `1, 2, 3…` **sans zéros devant**, extension
   d'origine conservée, dans l'**ordre chronologique strict** : `1` = le fichier
   le plus ancien par date et heure, `n` = le plus récent, et aucun autre ordre.
-  La date retenue est celle de **prise de vue (EXIF `DateTimeOriginal`)** ; à
-  défaut seulement, la plus ancienne des dates du fichier (sous Windows, la
-  « date de création » est celle de la copie sur le disque et ne reflète pas la
-  prise de vue). Égalité : nom d'origine. Procéder **en deux passes** (noms
-  temporaires puis noms définitifs) pour éviter les collisions. [7.2]
+  La date retenue est celle de **prise de vue (EXIF `DateTimeOriginal`)**,
+  puis `DateTime` si la première manque ou est illisible (« 0000:00:00… ») ;
+  avec son écart au temps universel (`OffsetTimeOriginal`, `OffsetTime`) quand
+  l'appareil l'inscrit, pour comparer sans erreur photos et vidéos prises à
+  l'étranger ou la nuit du changement d'heure. Une date d'avant 1970, que
+  Windows ne sait pas convertir, est ignorée au lieu de bloquer la
+  préparation. À défaut seulement, la plus ancienne des dates du fichier (sous
+  Windows, la « date de création » est celle de la copie sur le disque et ne
+  reflète pas la prise de vue). Égalité : nom d'origine. Procéder **en deux
+  passes** (noms temporaires puis noms définitifs) pour éviter les collisions ;
+  un sous-dossier qui porterait un nom définitif est signalé avant toute
+  passe. [7.2]
 
   **La numérotation porte sur l'ensemble photos + RAW + vidéos**, et les photos
   à trier gardent donc des trous une fois les RAW et les vidéos mis à l'écart
@@ -265,10 +401,22 @@ implémentés :
 
   **Un fichier qui n'est ni une photo, ni un RAW, ni une vidéo n'est jamais
   touché** : il n'est ni renommé, ni déplacé, ni compté dans la numérotation.
+  Les fichiers `._…` que macOS ajoute sur les clés et les cartes en font
+  partie, malgré leur extension de photo.
 - **Dossiers `RAW/` et `Videos/` créés uniquement si de tels fichiers
-  existent.** [7.1]
+  existent.** [7.1] S'ils existaient déjà et contiennent un fichier du même
+  nom, ou si le fichier est occupé, il reste à la racine et figure au compte
+  rendu : rien n'est écrasé, et la préparation va jusqu'au bout.
 - **La préparation automatique ne se rejoue jamais** à la reprise d'un événement
-  existant. [5, 10]
+  existant. [5, 10] Le suivi est toutefois écrit **avant** elle : une
+  préparation interrompue (fichier bloqué, coupure) n'a jamais eu lieu en
+  entier, et la reprise propose de la terminer.
+- **Renommage du dossier des photos** : s'il est impossible (fichier ouvert,
+  synchronisation, racine d'une carte), le tri se fait dans le dossier sous
+  son nom actuel, avec un message (choix de l'utilisateur). Un nom déjà pris
+  par un dossier voisin est refusé dès l'écran de configuration. Un dossier
+  qui appartient à un autre événement (un de ses dossiers de tri) n'est jamais
+  renommé, pour ne pas désorganiser cet événement.
 - **Rien n'est écrit sur le disque tant que la photo n'est pas validée** (Entrée
   ou touche de tri) : bandeaux et rotation sont provisoires à l'écran. [9.3]
 - **Réenregistrement dans le format d'origine** : un JPEG reste JPEG, un PNG
@@ -315,7 +463,21 @@ implémentés :
   photo. Elle suit la photo à chaque déplacement, disparaît si l'on annule, et
   n'est jamais écrasée si la photo est barrée de nouveau.
 - **Le fichier de suivi est mis à jour à chaque action** de l'utilisateur
-  (rangement, passage, pose de bandeau, annulation). [10]
+  (rangement, passage, validation, rognage, annulation, mode barrer). [10]
+  Les bandeaux posés, eux, ne sont que provisoires : rien n'est écrit tant
+  que la photo n'est pas validée.
+- **Clics et gestes sur les bandeaux** : un clic hors de la photo ne pose
+  rien ; un clic fait avant l'arrivée des visages (détection encore en cours)
+  pose aussitôt un bandeau manuel, remplacé par celui du visage dès qu'ils
+  arrivent (`recevoir_visages`) : une photo validée dans la foulée n'est
+  jamais sans bandeau, et le bandeau finit par suivre la tête, sauf si
+  l'utilisateur l'a retouché entre-temps, auquel cas il reste où il est ; sur un
+  bandeau fin à l'écran (moins de deux fois la zone d'une poignée), sa moitié
+  centrale le déplace au lieu de tirer une poignée d'épaisseur, qui
+  l'amincissait jusqu'à découvrir les yeux ; un double-clic sur une
+  poignée ne retire rien (deux saisies rapides forment un double-clic pour
+  Tk) et vaut un appui simple ; un appui en cours est oublié au changement de
+  photo ; un rognage oublie les visages sortis du cadre.
 - **Échap enregistre l'avancement puis ferme proprement.** [8.2, 9.5]
 
 ---
@@ -343,9 +505,22 @@ Mise en œuvre :
   rapprochés ne donnent qu'un seul dessin.
 - Les photos modifiées (censure, rognage) sont **enregistrées en arrière-plan**
   (`ecritures.py`). Règle : avant de déplacer, copier ou restaurer un fichier
-  depuis la fenêtre, attendre son enregistrement en cours
-  (`ecritures.attendre(chemin)`) ; à la fermeture, attendre tous les
+  depuis la fenêtre, attendre son enregistrement en cours, sans figer la
+  fenêtre (voir section 6) ; à la fermeture, attendre tous les
   enregistrements avant de vider le dossier des sauvegardes.
+- **Le chargeur ne relit jamais une photo en cours d'enregistrement** : il
+  attend la fin de son écriture (`attendre_ecriture`), sans quoi une photo
+  pivotée, sortie du cache puis revue, revenait sans sa rotation. Chaque
+  photo a un **numéro de version**, augmenté quand elle est remplacée,
+  oubliée ou déplacée : une lecture commencée avant est jetée.
+- **Le cache ne garde que ce que le chargeur prépare** : la photo précédente,
+  la courante et les trois suivantes. Dix photos entières montaient à 3 Go
+  avec des photos de 48 Mpx.
+- Une photo est **lue d'un bloc en mémoire** avant d'être décodée : le fichier
+  n'est ouvert que 2 ms au lieu de 110 ms, autant de temps pendant lequel
+  Windows refusait de le déplacer.
+- Les dossiers sont listés avec `os.scandir` : interroger le disque photo par
+  photo prenait 0,2 s pour 3 000 photos, à chaque ouverture du tri et du menu.
 
 ---
 
@@ -366,6 +541,35 @@ risque rien ; les réenregistrer les dégraderait, un GIF ne retenant que
 réécriture. Plutôt que d'abîmer la photo en silence, le logiciel refuse de la
 modifier et le dit. La liste fait foi dans `images.EXTENSIONS_MODIFIABLES`.
 
+`images.est_modifiable` regarde aussi **le contenu** du fichier (son en-tête
+seul) : un GIF animé ou un TIFF nommés `.jpg` perdaient, rognés, leurs images
+suivantes ou leur date. Les PNG et WEBP animés sont refusés de même. Si le
+fichier ne s'ouvre pas à cet instant, l'extension décide. Il n'est appelé
+qu'au moment de modifier la photo ; à l'affichage, seule l'extension compte
+(`extension_modifiable`) : ouvrir le fichier sur le fil principal forcerait le
+téléchargement d'une photo OneDrive « à la demande » et figerait la fenêtre.
+
+Règles du réenregistrement (`images.py`), toutes constatées par les essais :
+
+- **Transparence** : une image avec canal alpha ou couleur transparente
+  (PNG à palette, `tRNS`) est travaillée en RGBA. En RGB, une couleur-clé
+  noire rendait transparents les bandeaux noirs.
+- **Plus de 8 bits par couleur** (PNG 16 bits, HEIC 10 bits) : ramené en
+  8 bits, valeurs divisées par 256 ; converti tel quel, un PNG gris 16 bits
+  devenait blanc. Choix assumé : la différence ne se voit pas, et la censure
+  prime.
+- **Profil de couleurs** : celui d'une image CMJN ou en niveaux de gris est
+  retiré une fois l'image passée en RGB, qu'il ne décrit plus.
+- **WEBP** : sans perte s'il l'était (morceau `VP8L`), qualité 95 sinon ;
+  Pillow reencodait tout WEBP avec perte, en qualité 80.
+- **MPO** (JPEG à plusieurs vues) : toujours réenregistré en JPEG, première
+  vue seulement.
+- **HEIC** : le décodeur livré avec pillow-heif (libde265) ne relit pas une
+  image compressée de plus de 16 Mio. Un fichier de plus de 15 Mio est donc
+  relu avant de remplacer l'original, et réenregistré en qualité 85, 75, 60
+  puis 40 tant qu'il ne se relit pas ; sinon l'enregistrement échoue et
+  l'original reste intact.
+
 ---
 
 ## 9. Livrables attendus [12]
@@ -378,4 +582,7 @@ modifier et le dit. La liste fait foi dans `images.EXTENSIONS_MODIFIABLES`.
 5. Des lanceurs pour les trois systèmes, et une installation qui se fait seule.
 6. Des tests exécutables : `verifier_installation.py` pour l'installation,
    `tester_bandeau.py` pour la géométrie du bandeau, `tester_rognage.py` pour
-   celle du cadre de rognage.
+   celle du cadre de rognage, `tester_rangement.py` pour ce que deviennent
+   les fichiers (préparation, tri, annulation, fichiers bloqués, chargement,
+   bandeaux à la souris, gestion des dossiers) et `tester_formats.py` pour le
+   réenregistrement de chaque format. Tous doivent passer avant de livrer.

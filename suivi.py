@@ -8,10 +8,22 @@ l'action en cours.
 
 Aucune base de donnees n'est utilisee : un simple fichier texte suffit largement
 pour un seul utilisateur et un seul evenement.
+
+Deux organisations coexistent :
+
+- version 2 (depuis le 26 octobre 2026) : le dossier de l'evenement EST le
+  dossier source. Le logiciel le renomme du nom de l'evenement, et y cree les
+  dossiers de tri ; les photos a trier attendent a sa racine ;
+- version 1 (evenements plus anciens) : le dossier de l'evenement est un
+  sous-dossier, a son nom, place dans le dossier source.
+
+Les evenements de la version 1 se reprennent toujours, sans rien changer a
+leur organisation.
 """
 
-import json
 import os
+
+from fichiers import ecrire_json, lire_json
 
 # Nom du fichier de suivi, cree a la racine du dossier de l'evenement.
 NOM_FICHIER_SUIVI = "suivi.json"
@@ -20,6 +32,9 @@ NOM_FICHIER_SUIVI = "suivi.json"
 # rognage, pour permettre l'annulation (section 9.6). Vide a la fermeture de
 # la fenetre.
 NOM_DOSSIER_TEMPORAIRE = "_sauvegardes_temporaires"
+
+# Version des fichiers de suivi ecrits par ce programme (voir l'entete).
+VERSION = 2
 
 
 class Suivi:
@@ -34,22 +49,22 @@ class Suivi:
     # ------------------------------------------------------------------
 
     @classmethod
-    def creer(cls, dossier_source, nom_evenement, dossiers_tri):
+    def creer(cls, dossier_evenement, nom_evenement, dossiers_tri):
         """Construit un suivi tout neuf pour un evenement qui demarre.
 
-        dossiers_tri est une liste de quatre dictionnaires {"nom", "touche"}.
+        `dossier_evenement` est le dossier des photos lui-meme (version 2).
+        `dossiers_tri` est une liste de dictionnaires {"nom", "touche"}.
         """
-        dossier_evenement = os.path.join(dossier_source, nom_evenement)
         donnees = {
-            "version": 1,
+            "version": VERSION,
             "nom_evenement": nom_evenement,
-            "dossier_source": dossier_source,
-            "dossiers_tri": dossiers_tri,
+            "dossiers_tri": [{"nom": dossier["nom"], "touche": dossier["touche"]}
+                             for dossier in dossiers_tri],
             # Copies de dossiers faites depuis le menu principal. Elles ne sont
-            # pas des dossiers de tri (le tri en compte toujours quatre), mais
-            # elles peuvent etre censurees comme les autres.
+            # pas des dossiers de tri, mais elles peuvent etre revues et
+            # censurees comme les autres.
             "dossiers_dupliques": [],
-            # Passe a True une fois la preparation automatique effectuee ; elle
+            # Passe a True une fois la preparation automatique terminee ; elle
             # ne doit jamais etre rejouee ensuite (sections 5 et 10).
             "preparation_faite": False,
             "tri": {
@@ -62,13 +77,15 @@ class Suivi:
             # Mode barrer (pose de bandeaux sur les yeux) : active ou non par
             # la touche Tab, et retenu d'une photo et d'une session a l'autre.
             "mode_barrer": False,
+            # Dossier de tri choisi pour chaque photo : voir `rangements`.
+            "rangements": {},
         }
         return cls(dossier_evenement, donnees)
 
     @staticmethod
     def _revue_vide():
         return {
-            "dossier": None,       # nom du dossier de tri en cours de revue
+            "dossier": None,       # nom du dossier en cours de revue
             "photos": [],
             "position": 0,
             "historique": [],      # deplacements et rognages, pour l'annulation
@@ -77,16 +94,33 @@ class Suivi:
 
     @classmethod
     def charger(cls, dossier_evenement):
-        """Relit le fichier de suivi d'un evenement deja commence."""
-        chemin = os.path.join(dossier_evenement, NOM_FICHIER_SUIVI)
-        with open(chemin, "r", encoding="utf-8") as fichier:
-            donnees = json.load(fichier)
+        """Relit le fichier de suivi d'un evenement deja commence.
 
-        # Le dossier a pu etre deplace depuis la derniere session : on fait
-        # confiance a l'emplacement reel plutot qu'aux chemins enregistres.
-        suivi = cls(dossier_evenement, donnees)
-        suivi.donnees["dossier_source"] = os.path.dirname(dossier_evenement)
-        return suivi
+        Leve ValueError si le fichier ne ressemble pas a un fichier de suivi
+        (tronque, ou modifie a la main), plutot que de laisser le programme
+        s'arreter plus loin sur une cle manquante.
+        """
+        donnees = lire_json(os.path.join(dossier_evenement, NOM_FICHIER_SUIVI))
+        if (not isinstance(donnees, dict)
+                or not isinstance(donnees.get("dossiers_tri"), list)
+                or not isinstance(donnees.get("tri"), dict)
+                or not isinstance(donnees.get("nom_evenement"), str)
+                or not all(isinstance(dossier, dict)
+                           and isinstance(dossier.get("nom"), str)
+                           and isinstance(dossier.get("touche"), str)
+                           for dossier in donnees["dossiers_tri"])
+                or not isinstance(donnees.get("revue", {}), dict)
+                or not isinstance(donnees.get("dossiers_dupliques", []), list)
+                or not isinstance(donnees.get("rangements", {}), dict)):
+            raise ValueError("Le fichier de suivi est incomplet ou abime.")
+        # Les cles d'etape manquantes sont completees plutot que refusees : un
+        # fichier ecrit par une version plus ancienne peut ne pas toutes les
+        # avoir, et le tri s'arretait sinon plus loin sur une cle absente.
+        for etape in (donnees["tri"], donnees.setdefault("revue", cls._revue_vide())):
+            for cle, valeur in (("photos", []), ("position", 0), ("historique", []),
+                                ("terminee", False)):
+                etape.setdefault(cle, valeur)
+        return cls(dossier_evenement, donnees)
 
     @staticmethod
     def existe(dossier_evenement):
@@ -94,22 +128,13 @@ class Suivi:
         return os.path.isfile(os.path.join(dossier_evenement, NOM_FICHIER_SUIVI))
 
     def enregistrer(self):
-        """Ecrit le fichier de suivi sur le disque.
+        """Ecrit le fichier de suivi sur le disque (voir fichiers.ecrire_json).
 
-        L'ecriture passe par un fichier temporaire puis un remplacement atomique :
-        une coupure de courant en pleine ecriture ne peut donc pas laisser un
-        fichier de suivi tronque, qui rendrait la reprise impossible.
+        L'ecriture reessaie un court instant si le fichier est occupe : OneDrive,
+        par exemple, le lit pour l'envoyer en ligne a chaque modification.
         """
         os.makedirs(self.dossier_evenement, exist_ok=True)
-        chemin = os.path.join(self.dossier_evenement, NOM_FICHIER_SUIVI)
-        chemin_temporaire = chemin + ".tmp"
-        # Le texte est prepare d'un bloc puis ecrit en une fois : c'est cinq
-        # fois plus rapide que json.dump, qui ecrit morceau par morceau. Le
-        # fichier etant reecrit a chaque touche, la difference se sent.
-        texte = json.dumps(self.donnees, ensure_ascii=False, indent=2)
-        with open(chemin_temporaire, "w", encoding="utf-8") as fichier:
-            fichier.write(texte)
-        os.replace(chemin_temporaire, chemin)
+        ecrire_json(os.path.join(self.dossier_evenement, NOM_FICHIER_SUIVI), self.donnees)
 
     # ------------------------------------------------------------------
     # Acces simplifie aux informations les plus utilisees
@@ -121,11 +146,19 @@ class Suivi:
 
     @property
     def dossier_source(self):
-        return self.donnees["dossier_source"]
+        """Dossier dont la racine contient les photos a trier.
+
+        Le chemin est deduit de l'emplacement reel du dossier de l'evenement,
+        et non relu dans le fichier : l'evenement a pu etre deplace ou renomme
+        depuis la derniere session.
+        """
+        if self.donnees.get("version", 1) >= 2:
+            return self.dossier_evenement
+        return os.path.dirname(self.dossier_evenement)
 
     @property
     def dossiers_tri(self):
-        """Liste des quatre dictionnaires {"nom", "touche"}."""
+        """Liste des dossiers de tri, dictionnaires {"nom", "touche"}."""
         return self.donnees["dossiers_tri"]
 
     @property
@@ -147,11 +180,11 @@ class Suivi:
 
     @property
     def noms_dossiers_censurables(self):
-        """Dossiers que l'on peut passer en revue a l'etape de censure.
+        """Dossiers que l'on peut passer en revue.
 
-        Les quatre dossiers de tri, plus les copies qui existent encore sur le
-        disque. Les dossiers RAW et Videos en sont volontairement absents : leur
-        contenu ne doit jamais etre modifie.
+        Les dossiers de tri, plus les copies qui existent encore sur le disque.
+        Les dossiers RAW et Videos en sont volontairement absents : leur contenu
+        ne doit jamais etre modifie.
         """
         noms = list(self.noms_dossiers_tri)
         for nom in self.dossiers_dupliques:
@@ -184,8 +217,8 @@ class Suivi:
     def chemin_dossier(self, nom_dossier):
         """Chemin complet d'un dossier range dans le dossier de l'evenement.
 
-        Sert aussi bien aux quatre dossiers de tri qu'aux copies faites depuis
-        le menu principal.
+        Sert aussi bien aux dossiers de tri qu'aux copies faites depuis le
+        menu principal.
         """
         return os.path.join(self.dossier_evenement, nom_dossier)
 
@@ -203,3 +236,79 @@ class Suivi:
             if dossier["touche"].lower() == touche.lower():
                 return dossier["nom"]
         return None
+
+    # ------------------------------------------------------------------
+    # Ou chaque photo a ete rangee
+    # ------------------------------------------------------------------
+
+    @property
+    def rangements(self):
+        """Dossier de tri choisi pour chaque photo rangee : {nom de photo: nom de dossier}.
+
+        Garde la trace des decisions de l'utilisateur, independamment de ce
+        que contient le disque. C'est ce qui permet de reperer une photo
+        rangee qu'un service de synchronisation a remise ensuite dans le
+        dossier source (voir remise_en_place.py). `setdefault` : absent des
+        suivis ecrits par une version precedente.
+        """
+        return self.donnees.setdefault("rangements", {})
+
+    def noter_rangement(self, nom_fichier, nom_dossier):
+        """Note le dossier ou la photo vient d'etre rangee ; None si elle revient a trier."""
+        if nom_dossier is None:
+            self.rangements.pop(nom_fichier, None)
+        else:
+            self.rangements[nom_fichier] = nom_dossier
+
+    # ------------------------------------------------------------------
+    # Modification de la liste des dossiers de tri
+    # ------------------------------------------------------------------
+    # Ces methodes ne touchent qu'au suivi : les dossiers eux-memes sont crees,
+    # renommes ou supprimes sur le disque par l'appelant.
+
+    def ajouter_dossier_tri(self, nom, touche):
+        self.dossiers_tri.append({"nom": nom, "touche": touche})
+
+    def renommer_dossier_tri(self, ancien_nom, nouveau_nom):
+        """Fait suivre le nouveau nom d'un dossier de tri partout ou le suivi le cite.
+
+        Les historiques d'annulation designent les dossiers par leur nom : sans
+        cette mise a jour, annuler un rangement chercherait la photo dans un
+        dossier qui n'existe plus sous ce nom.
+        """
+        for dossier in self.dossiers_tri:
+            if dossier["nom"] == ancien_nom:
+                dossier["nom"] = nouveau_nom
+        for photo, dossier in self.rangements.items():
+            if dossier == ancien_nom:
+                self.rangements[photo] = nouveau_nom
+        if self.revue["dossier"] == ancien_nom:
+            self.revue["dossier"] = nouveau_nom
+        for etat in (self.tri, self.revue):
+            for action in etat["historique"]:
+                for cle in ("dossier", "depuis", "emplacement"):
+                    if action.get(cle) == ancien_nom:
+                        action[cle] = nouveau_nom
+
+    def changer_touche(self, nom_dossier, touche):
+        for dossier in self.dossiers_tri:
+            if dossier["nom"] == nom_dossier:
+                dossier["touche"] = touche
+
+    def retirer_dossier_tri(self, nom):
+        """Retire un dossier de tri (vide) de la liste, et tout ce qui le cite."""
+        self.donnees["dossiers_tri"] = [dossier for dossier in self.dossiers_tri
+                                        if dossier["nom"] != nom]
+        for photo in [photo for photo, dossier in self.rangements.items() if dossier == nom]:
+            del self.rangements[photo]
+        if self.revue["dossier"] == nom:
+            self.donnees["revue"] = Suivi._revue_vide()
+        for etat in (self.tri, self.revue):
+            etat["historique"] = [action for action in etat["historique"]
+                                  if nom not in (action.get("dossier"), action.get("depuis"),
+                                                 action.get("emplacement"))]
+
+    def ordonner_dossiers_tri(self, dossiers):
+        """Remplace la liste par `dossiers` ({"nom", "touche"}), dans cet ordre."""
+        self.donnees["dossiers_tri"] = [{"nom": dossier["nom"], "touche": dossier["touche"]}
+                                        for dossier in dossiers]

@@ -7,13 +7,19 @@ evite que les deux etapes traitent l'orientation differemment, ce qui est la
 premiere source d'erreur sur ce genre de logiciel.
 """
 
+import io
 import os
 import shutil
 import threading
-import time
 
 from PIL import ExifTags, Image, ImageOps
 import pillow_heif
+
+# Le remplacement d'un fichier reessaie un court instant si Windows refuse :
+# les photos sont enregistrees en arriere-plan (voir ecritures.py), et le
+# chargement anticipe peut justement etre en train de lire celle que l'on
+# remplace.
+from fichiers import remplacer_fichier
 
 # Enregistre le format HEIC aupres de Pillow (photos d'iPhone).
 # A faire une seule fois, au chargement du module.
@@ -35,8 +41,23 @@ FORMATS_AVEC_EXIF = {"JPEG", "PNG", "HEIF", "HEIC", "WEBP"}
 # triees et renommees, mais ni rognees ni censurees : voir est_modifiable.
 EXTENSIONS_MODIFIABLES = {".jpg", ".jpeg", ".jpe", ".png", ".heic", ".heif", ".webp"}
 
+# Les memes, d'apres le contenu du fichier. « MPO » est le JPEG de certains
+# appareils, qui y joignent une seconde vue : seule la premiere est gardee.
+FORMATS_MODIFIABLES = {"JPEG", "MPO", "PNG", "WEBP", "HEIF", "HEIC"}
 
-def est_modifiable(nom_fichier):
+
+def extension_modifiable(nom_fichier):
+    """Premier tri, sur la seule extension, sans ouvrir le fichier (voir est_modifiable).
+
+    Sert a l'affichage de chaque photo : ouvrir le fichier a ce moment-la,
+    sur le fil principal, forcerait le telechargement d'une photo OneDrive
+    « disponible a la demande » avant meme que le chargeur ne s'en charge, et
+    figerait la fenetre le temps de ce telechargement.
+    """
+    return os.path.splitext(nom_fichier)[1].lower() in EXTENSIONS_MODIFIABLES
+
+
+def est_modifiable(chemin):
     """La photo peut-elle etre rognee ou censuree sans perte ?
 
     Le tri accepte plus de formats que la retouche. Un BMP, un GIF ou un TIFF
@@ -45,11 +66,41 @@ def est_modifiable(nom_fichier):
     et ni l'un ni l'autre ne conserve ses donnees EXIF a la reecriture. Plutot
     que d'abimer la photo en silence, le logiciel refuse de la modifier et le
     dit (voir rangement.py).
+
+    L'extension ne suffit pas : un GIF anime ou un TIFF nommes « .jpg » (cela
+    arrive avec des images telechargees) perdaient, une fois rognes, l'un ses
+    images suivantes, l'autre sa date de prise de vue. On regarde donc aussi
+    le contenu du fichier, dont seul l'en-tete est lu. Un PNG ou un WEBP
+    animes sont refuses pour la meme raison. Si le fichier ne peut pas etre
+    ouvert a cet instant, l'extension decide : l'enregistrement, lui, dira
+    s'il echoue.
+
+    N'est appele qu'au moment de modifier la photo, deja affichee : son
+    fichier a alors ete lu, et l'ouvrir de nouveau ne coute rien.
     """
-    return os.path.splitext(nom_fichier)[1].lower() in EXTENSIONS_MODIFIABLES
+    if not extension_modifiable(chemin):
+        return False
+    try:
+        with Image.open(chemin) as image:
+            if image.format not in FORMATS_MODIFIABLES:
+                return False
+            if image.format in ("PNG", "WEBP"):
+                return getattr(image, "n_frames", 1) == 1
+            return True
+    except Exception:
+        return True
 
 
 def est_une_image(nom_fichier):
+    """Le fichier est-il une photo, d'apres son nom ?
+
+    « ._IMG_0001.JPG » n'en est pas une : macOS l'ajoute a cote de chaque
+    fichier copie sur une cle ou une carte memoire, avec l'extension de la
+    photo, mais il ne contient que des informations du Mac. Ni la preparation,
+    ni le tri, ni le menu ne doivent le compter.
+    """
+    if os.path.basename(nom_fichier).startswith("._"):
+        return False
     return os.path.splitext(nom_fichier)[1].lower() in EXTENSIONS_IMAGE
 
 
@@ -72,20 +123,52 @@ def charger_image(chemin):
     de sorte que la suite du programme n'a plus jamais a s'en soucier : les
     coordonnees a l'ecran et celles de l'image enregistree coincident.
 
-    Le `with` ferme explicitement le fichier d'origine. En pratique Pillow le
-    ferme deja de lui-meme, des que `exif_transpose` lit les pixels (verifie
-    par mesure : `fp` vaut bien None au retour, avec comme sans etiquette
-    d'orientation). Mais cela repose sur un detail de fonctionnement de Pillow,
-    et non sur une garantie : un format futur, ou une photo tronquee, pourrait
-    s'arreter avant la lecture complete et laisser le fichier ouvert. Sous
-    Windows, un fichier ouvert ne peut etre ni remplace ni deplace, ce qui
-    ferait echouer un rognage ou un rangement. Le `with` est donc la pour
-    garantir ce que Pillow ne promet pas.
+    Le fichier est d'abord lu en memoire d'un seul bloc, puis decode depuis la
+    memoire. Sous Windows, un fichier ouvert ne peut etre ni remplace ni
+    deplace : decodee directement depuis le disque, une photo de 24 Mpx
+    restait ouverte 110 ms, pendant lesquelles un rangement ou un rognage de
+    cette photo pouvait echouer. Lue d'un bloc, elle ne l'est plus que 2 ms.
     """
-    with Image.open(chemin) as fichier_ouvert:
+    with open(chemin, "rb") as fichier:
+        donnees = fichier.read()
+    with Image.open(io.BytesIO(donnees)) as fichier_ouvert:
         image = ImageOps.exif_transpose(fichier_ouvert)
-    if image.mode not in ("RGB", "RGBA"):
+    return ramener_en_rgb(image)
+
+
+# Modes Pillow des images a 16 bits par point (PNG en niveaux de gris 16 bits).
+MODES_16_BITS = {"I", "I;16", "I;16B", "I;16L", "I;16N"}
+
+
+def ramener_en_rgb(image):
+    """Ramene la photo en RGB, ou en RGBA si elle a de la transparence.
+
+    Tout le logiciel travaille en RGB. Trois pieges, constates par les essais :
+    - une image a 16 bits par point (valeurs de 0 a 65535) etait ecretee :
+      tout ce qui depassait 255 devenait 255, et la photo devenait blanche.
+      On divise donc d'abord par 256 ;
+    - une transparence par « couleur-cle » (PNG a palette, ou RGB dont une
+      couleur est declaree transparente) survivait a la conversion : a
+      l'enregistrement, tous les points de cette couleur redevenaient
+      transparents, bandeaux noirs compris si la couleur-cle etait le noir.
+      Un vrai canal de transparence (RGBA) l'evite, et garde aussi celle
+      d'un PNG gris avec transparence, que la conversion en RGB perdait ;
+    - le profil de couleurs d'une photo CMJN ou en niveaux de gris ne decrit
+      pas une image RGB : recolle tel quel, il fausserait les couleurs. Il
+      est retire.
+    """
+    if image.mode in MODES_16_BITS:
+        image = image.point(lambda valeur: valeur * (1 / 256)).convert("L")
+    if image.mode == "RGBA" or (image.mode == "RGB" and "transparency" not in image.info):
+        return image
+    profil = image.info.get("icc_profile")
+    if "A" in image.getbands() or "transparency" in image.info:
+        image = image.convert("RGBA")
+    else:
         image = image.convert("RGB")
+    # Les octets 16 a 19 d'un profil de couleurs disent quel espace il decrit.
+    if profil and profil[16:20] != b"RGB ":
+        image.info.pop("icc_profile", None)
     return image
 
 
@@ -115,9 +198,13 @@ def enregistrer_au_format_origine(image, chemin, format_image):
     d'origine reste intacte au lieu d'etre remplacee par un fichier a moitie
     ecrit.
     """
-    if format_image in (None, "MPO"):
+    if format_image == "MPO":
+        # Un « MPO » est une suite de JPEG (plusieurs vues) : on enregistre la
+        # premiere, en JPEG, quelle que soit l'extension (.jpg, .jpeg, .jpe).
+        format_image = "JPEG"
+    elif format_image is None:
         # Format inconnu : on se rabat sur ce que dit l'extension du fichier.
-        format_image = "JPEG" if chemin.lower().endswith((".jpg", ".jpeg")) else "PNG"
+        format_image = "JPEG" if chemin.lower().endswith((".jpg", ".jpeg", ".jpe")) else "PNG"
 
     options = {}
     if format_image == "JPEG":
@@ -125,6 +212,10 @@ def enregistrer_au_format_origine(image, chemin, format_image):
         options = {"quality": 95, "subsampling": 0}
     elif format_image in ("HEIF", "HEIC"):
         options = {"quality": 95}
+    elif format_image == "WEBP":
+        # Sans reglage, Pillow reencode tout WEBP avec perte, en qualite 80 :
+        # un WEBP sans perte doit le rester, et les autres suivent le JPEG.
+        options = {"lossless": webp_sans_perte(chemin), "quality": 95}
 
     # Pillow n'ecrit les informations de la photo que si on les lui redonne.
     # Sans cela, une photo rognee ou censuree perdrait sa date de prise de vue
@@ -141,8 +232,72 @@ def enregistrer_au_format_origine(image, chemin, format_image):
             options["icc_profile"] = image.info["icc_profile"]
 
     chemin_temporaire = chemin + ".tmp"
-    image.save(chemin_temporaire, format=format_image, **options)
-    _remplacer_fichier(chemin_temporaire, chemin)
+    try:
+        if format_image in ("HEIF", "HEIC"):
+            _enregistrer_en_heic_lisible(image, chemin_temporaire, options)
+        else:
+            image.save(chemin_temporaire, format=format_image, **options)
+        remplacer_fichier(chemin_temporaire, chemin)
+    except Exception:
+        # La photo d'origine est intacte ; le fichier temporaire, lui, ne doit
+        # pas rester dans le dossier de l'utilisateur.
+        try:
+            os.remove(chemin_temporaire)
+        except OSError:
+            pass
+        raise
+
+
+# Le decodeur HEIC livre avec pillow-heif ne relit pas une image dont les
+# donnees compressees depassent 16 Mio (voir _enregistrer_en_heic_lisible).
+# En dessous de ce seuil, avec une marge, inutile de verifier.
+TAILLE_HEIC_SANS_VERIFICATION = 15 * 1024 * 1024
+QUALITES_HEIC = (95, 85, 75, 60, 40)
+
+
+def _enregistrer_en_heic_lisible(image, chemin_temporaire, options):
+    """Enregistre en HEIC, en baissant la qualite si le fichier ne se relirait pas.
+
+    Mesure (pillow-heif 1.5, libheif 1.23, libde265 1.1) : une photo HEIC dont
+    les donnees compressees depassent 16 Mio, quelle que soit sa taille en
+    pixels, s'enregistre sans erreur mais ne se relit plus. Une photo de
+    24 Mpx tres detaillee, reenregistree en qualite 95, y arrivait : apres
+    une censure, elle devenait « illisible » dans le logiciel (Windows, lui,
+    la lisait). Un gros fichier est donc relu avant de remplacer l'original,
+    et reenregistre un peu plus compresse tant qu'il ne se relit pas. Si rien
+    n'y fait, l'enregistrement echoue et la photo d'origine reste intacte.
+    """
+    for qualite in QUALITES_HEIC:
+        image.save(chemin_temporaire, format="HEIF", **dict(options, quality=qualite))
+        if os.path.getsize(chemin_temporaire) <= TAILLE_HEIC_SANS_VERIFICATION:
+            return
+        try:
+            with Image.open(chemin_temporaire) as relue:
+                relue.load()
+            return
+        except Exception:
+            continue
+    raise OSError("photo trop detaillee pour etre reenregistree en HEIC lisible")
+
+
+def webp_sans_perte(chemin):
+    """Le fichier WEBP est-il compresse sans perte ?
+
+    Un WEBP est une suite de morceaux : « RIFF », sa taille, « WEBP », puis des
+    morceaux faits d'un nom de 4 lettres, de leur taille et de leur contenu.
+    L'image elle-meme est dans un morceau « VP8 » (avec perte) ou « VP8L »
+    (sans perte), parfois precede de « VP8X », « ICCP » ou « ALPH ».
+    """
+    with open(chemin, "rb") as fichier:
+        donnees = fichier.read()
+    position = 12
+    while position + 8 <= len(donnees):
+        nom = donnees[position:position + 4]
+        if nom in (b"VP8L", b"VP8 "):
+            return nom == b"VP8L"
+        taille = int.from_bytes(donnees[position + 4:position + 8], "little")
+        position += 8 + taille + taille % 2        # morceaux alignes sur 2 octets
+    return False
 
 
 # Etiquettes EXIF donnant les dimensions de la photo, dans le bloc Exif :
@@ -172,24 +327,6 @@ def _mettre_a_jour_les_dimensions_exif(exif, taille):
                               (ETIQUETTE_HAUTEUR_EXIF, taille[1])):
         if etiquette in details:
             details[etiquette] = valeur
-
-
-def _remplacer_fichier(source, destination):
-    """Comme os.replace, mais en reessayant un court instant si Windows refuse.
-
-    Windows refuse de remplacer un fichier pendant qu'il est lu. Or les photos
-    sont enregistrees en arriere-plan (voir ecritures.py), et le chargement
-    anticipe peut justement etre en train de lire celle que l'on remplace. Une
-    lecture ne durant qu'une fraction de seconde, on reessaie pendant deux
-    secondes avant d'abandonner.
-    """
-    for _ in range(40):
-        try:
-            os.replace(source, destination)
-            return
-        except PermissionError:
-            time.sleep(0.05)
-    os.replace(source, destination)     # dernier essai : cette fois, l'erreur remonte
 
 
 def copie_de_sauvegarde(chemin, dossier_sauvegarde):
@@ -231,17 +368,28 @@ class ChargeurAnticipe:
     Le fil d'execution ne touche jamais a l'interface graphique : il se contente
     de produire des images Pillow. C'est indispensable, car Tkinter ne supporte
     pas d'etre manipule depuis un autre fil que le fil principal.
+
+    Une photo modifiee est enregistree en arriere-plan (ecritures.py) : tant
+    que son enregistrement n'est pas fini, le fichier contient encore
+    l'ancienne version. `attendre_ecriture(chemin)`, donne par la fenetre, est
+    donc appele avant toute lecture : sans lui, une photo pivotee puis quittee
+    revenait sans sa rotation, et l'utilisateur la pivotait une seconde fois.
     """
 
-    def __init__(self, chemins, taille_apercu, nb_avance=3, taille_cache=10):
+    def __init__(self, chemins, taille_apercu, nb_avance=3, attendre_ecriture=None):
         self.chemins = list(chemins)
         self.taille_apercu = taille_apercu
         self.nb_avance = nb_avance
-        self.taille_cache = taille_cache
+        self.attendre_ecriture = attendre_ecriture
 
         # index -> (image, apercu). (None, None) si la photo est illisible ;
         # (image, None) si l'apercu est a refaire (voir changer_taille_apercu).
         self.cache = {}
+        # index -> numero de version, augmente chaque fois que la photo change
+        # (remplacee, oubliee, deplacee). Une lecture commencee avant le
+        # changement est perimee : son resultat est jete, au lieu d'ecraser en
+        # memoire la version qui vient d'etre mise.
+        self.versions = {}
         self.position = 0               # photo actuellement regardee
         self.en_lecture = None          # index que le fil d'arriere-plan prepare
         self.actif = True
@@ -259,20 +407,24 @@ class ChargeurAnticipe:
 
     def photo(self, index):
         """Renvoie (image, apercu), en preparant la photo tout de suite si besoin."""
-        with self.signal:
-            self._attendre_fin_de_lecture(index)
-            if self._est_prete(index):
-                return self.cache[index]
-            image_deja_lue = self._image_en_memoire(index)
+        while True:
+            with self.signal:
+                self._attendre_fin_de_lecture(index)
+                if self._est_prete(index):
+                    return self.cache[index]
+                image_deja_lue = self._image_en_memoire(index)
+                version = self.versions.get(index, 0)
 
-        # Pas encore prete : on la prepare ici meme plutot que d'attendre que le
-        # fil d'arriere-plan y arrive. C'est plus simple et cela ne peut jamais
-        # se bloquer.
-        photo = self._preparer(index, image_deja_lue)
-        with self.signal:
-            self.cache[index] = photo
-            self.signal.notify_all()
-        return photo
+            # Pas encore prete : on la prepare ici meme plutot que d'attendre
+            # que le fil d'arriere-plan y arrive. C'est plus simple et cela ne
+            # peut jamais se bloquer.
+            photo = self._preparer(index, image_deja_lue)
+            with self.signal:
+                if self.versions.get(index, 0) == version:
+                    self.cache[index] = photo
+                    self.signal.notify_all()
+                    return photo
+            # La photo a change pendant qu'on la preparait : on recommence.
 
     def image(self, index):
         """Renvoie l'image entiere de la photo demandee (l'apercu n'est pas necessaire)."""
@@ -315,6 +467,7 @@ class ChargeurAnticipe:
         """
         with self.signal:
             self._attendre_fin_de_lecture(index)
+            self._nouvelle_version(index)
             self.cache[index] = (image, apercu)
             self.signal.notify_all()
 
@@ -327,6 +480,7 @@ class ChargeurAnticipe:
         """
         with self.signal:
             self._attendre_fin_de_lecture(index)
+            self._nouvelle_version(index)
             self.cache.pop(index, None)
             self.signal.notify_all()
 
@@ -343,12 +497,16 @@ class ChargeurAnticipe:
 
         L'image deja en memoire reste valable : seul l'emplacement du fichier a
         change, pas son contenu. En revanche, une lecture ratee a l'ancien
-        emplacement est oubliee, pour que la photo soit relue au bon endroit.
+        emplacement est oubliee, pour que la photo soit relue au bon endroit ;
+        une lecture en cours a l'ancien emplacement est jetee pour la meme
+        raison (sans cela, une photo rangee pendant « Chargement... » restait
+        « illisible » pour toute la session).
         """
         with self.signal:
             if self.chemins[index] == chemin:
                 return
             self.chemins[index] = chemin
+            self._nouvelle_version(index)
             if index in self.cache and self.cache[index][0] is None:
                 del self.cache[index]
             self.signal.notify_all()
@@ -399,17 +557,30 @@ class ChargeurAnticipe:
         while self.en_lecture == index and self.actif:
             self.signal.wait()
 
+    def _nouvelle_version(self, index):
+        """Note que la photo a change : toute lecture deja commencee est perimee."""
+        self.versions[index] = self.versions.get(index, 0) + 1
+
     def _preparer(self, index, image_deja_lue):
-        """Lit la photo si besoin, puis fabrique son apercu. Renvoie (image, apercu)."""
-        image = image_deja_lue
-        if image is None:
-            try:
-                image = charger_image(self.chemins[index])
-            except Exception:
-                # Fichier illisible ou corrompu : on ne fait pas echouer tout le
-                # programme pour une photo. L'appelant affichera un message.
-                return (None, None)
-        return (image, fabriquer_apercu(image, self.taille_apercu))
+        """Lit la photo si besoin, puis fabrique son apercu. Renvoie (image, apercu).
+
+        Tout le travail est protege, apercu compris : une erreur imprevue (un
+        manque de memoire sur une tres grande photo) tuait sinon le fil
+        d'arriere-plan, et toutes les photos suivantes restaient sur
+        « Chargement... ».
+        """
+        try:
+            image = image_deja_lue
+            if image is None:
+                chemin = self.chemins[index]
+                if self.attendre_ecriture is not None:
+                    self.attendre_ecriture(chemin)
+                image = charger_image(chemin)
+            return (image, fabriquer_apercu(image, self.taille_apercu))
+        except Exception:
+            # Fichier illisible ou corrompu : on ne fait pas echouer tout le
+            # programme pour une photo. L'appelant affichera un message.
+            return (None, None)
 
     def _prochain_a_charger(self):
         """Index de la prochaine photo a preparer, ou None s'il n'y a rien a faire."""
@@ -425,11 +596,19 @@ class ChargeurAnticipe:
         return None
 
     def _nettoyer_cache(self):
-        """Oublie les photos trop eloignees pour ne pas saturer la memoire."""
-        if len(self.cache) <= self.taille_cache:
-            return
-        for index in sorted(self.cache, key=lambda i: abs(i - self.position))[self.taille_cache:]:
-            del self.cache[index]
+        """Ne garde en memoire que les photos que prepare _prochain_a_charger.
+
+        C'est-a-dire la precedente, la courante et les nb_avance suivantes.
+        Une photo de 24 Mpx occupe pres de 100 Mo en memoire : en garder dix,
+        comme auparavant, montait a 3 Go avec des photos de 48 Mpx, de quoi
+        saturer un portable. Garder exactement ce que le fil prepare evite
+        aussi de jeter la photo qu'il vient de lire, qu'il relirait aussitot.
+        """
+        premiere = self.position - 1
+        derniere = self.position + self.nb_avance
+        for index in list(self.cache):
+            if not premiere <= index <= derniere:
+                del self.cache[index]
 
     def _travailler(self):
         while True:
@@ -440,6 +619,7 @@ class ChargeurAnticipe:
                     return
                 index = self._prochain_a_charger()
                 image_deja_lue = self._image_en_memoire(index)
+                version = self.versions.get(index, 0)
                 self.en_lecture = index
 
             # La preparation, qui est lente, se fait en dehors du verrou pour ne
@@ -451,5 +631,9 @@ class ChargeurAnticipe:
                 self.signal.notify_all()
                 if not self.actif:
                     return
-                self.cache[index] = photo
-                self._nettoyer_cache()
+                # Une photo remplacee, oubliee ou deplacee pendant sa lecture :
+                # ce qui vient d'etre lu est perime, elle sera reprise au tour
+                # suivant.
+                if self.versions.get(index, 0) == version:
+                    self.cache[index] = photo
+                    self._nettoyer_cache()
