@@ -6,7 +6,8 @@ A la configuration d'un nouvel evenement, l'utilisateur retrouve ses dossiers
 de tri tels qu'il les avait laisses la derniere fois : leurs noms, leur nombre
 et leurs touches, y compris ceux crees pendant le tri avec la touche N. Sont
 aussi retenus le dernier evenement ouvert, pour le reprendre en un clic, le
-dossier ou l'on va chercher ses photos, et la taille de la fenetre de tri.
+dossier ou l'on va chercher ses photos, le format des noms donnes aux photos,
+et la taille de la fenetre de tri.
 
 Tout tient dans un petit fichier JSON place a cote du programme. Il n'est
 jamais indispensable : s'il manque ou s'il est illisible, le logiciel repart
@@ -68,6 +69,17 @@ def dossiers_de_tri():
 def retenir_dossiers_de_tri(dossiers):
     _retenir("dossiers_tri", [{"nom": dossier["nom"], "touche": dossier["touche"]}
                               for dossier in dossiers])
+
+
+# --- Nom des photos ---------------------------------------------------------
+
+def format_de_renommage():
+    """Format de nom choisi la derniere fois (voir renommage.py), ou None."""
+    return _texte("format_de_renommage")
+
+
+def retenir_format_de_renommage(nom_format):
+    _retenir("format_de_renommage", nom_format)
 
 
 # --- Emplacements -----------------------------------------------------------

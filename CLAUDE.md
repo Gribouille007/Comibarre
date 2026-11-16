@@ -41,7 +41,8 @@ ils sont désormais réunis dans `rangement.py`. La censure est le **mode
 barrer**, activé et désactivé par la touche **Tab**, et **retenu** d'une photo
 et d'une session à l'autre (`mode_barrer` dans le suivi). Tri et revue ne
 diffèrent que par le dossier d'origine ; une copie faite depuis le menu se
-revoit aussi, mais sans touches de tri (ses photos n'en sortent pas).
+revoit aussi, mais sans touches de tri (ses photos n'en sortent pas). Le menu
+de l'événement est dans `menu.py`.
 
 **Le rognage se fait en réduisant les bords** (décision de l'utilisateur,
 16 octobre 2026), comme sur un téléphone : à l'ouverture, le cadre épouse la
@@ -49,6 +50,25 @@ photo entière, et l'on tire l'un de ses quatre bords, l'un de ses quatre coins,
 ou le cadre entier. Il fallait auparavant tracer un rectangle à la souris, ce
 qui obligeait à tout recommencer dès qu'on le plaçait mal, et ne permettait pas
 de ne retirer qu'une bande d'un seul côté.
+
+**Cinq décisions de l'utilisateur, 16 novembre 2026 :**
+
+1. **Le nom des photos se choisit** (`renommage.py`) : « date, heure et code »
+   par défaut (`2026-08-24_14-03-27_K7F2.jpg`), « date et heure », « numéros »
+   (le seul format auparavant), « nom de l'événement et numéro », ou **aucun
+   renommage**. But : que deux tris faits sur deux ordinateurs se réunissent
+   sans qu'un nom se répète, tout en restant classés de la plus ancienne à la
+   plus récente quand on trie par nom. Le format se change après coup depuis
+   le menu (`renommage_evenement.py`).
+2. **Tout reste annulable jusqu'à « Terminer la session »** (`fin_de_session.py`) :
+   l'historique et les copies intactes sont gardés d'une session à l'autre.
+   Le bouton du menu rend le tri définitif.
+3. **Retour arrière annule ce qu'on a fait à la photo sur laquelle on est
+   revenu**, et plus seulement la dernière action (`rangement._action_a_annuler`).
+4. **Les dossiers vides sont supprimés quand la session est terminée**, et
+   seulement alors.
+5. **Statistiques en temps réel** au bas de la fenêtre de tri, et **démarrage
+   rapide** (section 7).
 
 Volume visé : jusqu'à environ **3 000 photos** par session, sans perte de
 fluidité. [1]
@@ -176,8 +196,8 @@ OpenCV suffit là où mediapipe imposait 17 paquets supplémentaires.
 - **Aucune base de données.** Pas de SQLite, pas d'ORM. L'avancement est
   conservé dans un simple **fichier de suivi placé dans le dossier de
   l'événement** [10]. Ce que le logiciel retient d'une ouverture à l'autre
-  (dossiers de tri, dernier événement, dossier des photos, taille de la
-  fenêtre de tri) tient dans `preferences.json`, à côté du programme
+  (dossiers de tri, format de nom des photos, dernier événement, dossier des
+  photos, taille de la fenêtre de tri) tient dans `preferences.json`, à côté du programme
   (`preferences.py`) : jamais indispensable, ignoré s'il est illisible.
 - **Un seul utilisateur**, **un seul événement traité à la fois**. Aucune notion
   de compte, de session partagée ou de concurrence entre utilisateurs.
@@ -270,9 +290,39 @@ implémentés :
   ensuite (`retouches.py`), par quart de tour exact, sans recalcul de pixels.
 - **Le tri ne présente que les photos encore dans le dossier source**
   (décision de l'utilisateur, 16 octobre 2026) : la liste est refaite à chaque
-  ouverture à partir de la racine du dossier source (`tri.preparer_tri`), et
-  l'historique d'annulation du tri repart de zéro. Les photos rangées pendant
-  la session restent dans la liste, pour la flèche gauche.
+  ouverture à partir de la racine du dossier source (`tri.preparer_tri`). Les
+  photos rangées pendant la session restent dans la liste, pour la flèche
+  gauche ; celles d'une session précédente se retrouvent en mode revue.
+- **Annulation** (décision de l'utilisateur, 16 novembre 2026). Un seul
+  historique pour le tri et la revue (`Suivi.historique`), gardé d'une session
+  à l'autre. Retour arrière choisit son action ainsi (`_action_a_annuler`) :
+  si l'utilisateur est **arrivé de lui-même** sur la photo affichée (flèches,
+  ouverture de la fenêtre) et qu'elle a des actions, la plus récente de
+  **cette photo** ; sinon la dernière action **de la session**. Ne pas
+  simplifier en « toujours la photo affichée » : après un rangement fait par
+  erreur, la photo suivante est à l'écran, et Retour arrière retirerait les
+  bandeaux qu'elle a reçus la veille au lieu de ramener la photo rangée. Le
+  rappel des touches dit toujours ce qui sera annulé. Une action désigne sa
+  photo par son **nom**, jamais par sa position dans la liste, et sa copie
+  intacte par le **nom du fichier de sauvegarde**, jamais par un chemin
+  complet (le dossier de l'événement peut être déplacé entre deux sessions).
+  Les retouches d'une copie faite depuis le menu ne se mélangent pas à celles
+  de la photo d'origine, qui porte le même nom.
+- **Fin de session** (`fin_de_session.py`) : seul le bouton « Terminer la
+  session » du menu efface les copies intactes et vide l'historique, après
+  confirmation ; **rien d'autre ne doit le faire**, pas même la fermeture. Il
+  supprime aussi les dossiers vides (tri, `RAW`, `Videos`), qui restent dans
+  la liste de l'événement et sont recréés au premier rangement. Un dossier
+  qui ne contient que `.DS_Store`, `Thumbs.db`, `desktop.ini` ou des `._…`
+  est vide ; la suppression passe par `os.rmdir`, qui ne peut rien effacer
+  d'autre.
+- **Statistiques** au bas de la fenêtre (`statistiques.py`) : à trier, rangées (nombre et
+  pourcentage), nombre de photos de chaque dossier à côté de sa touche,
+  rythme et temps restant après cinq rangements (une pause compte pour une
+  minute au plus), actions annulables. Les compteurs sont lus sur le disque à
+  l'ouverture, à la touche N et à l'écran de fin, et suivent chaque
+  rangement entre-temps : relire les dossiers à chaque touche ralentirait le
+  tri sur un disque lent.
 - **Aucun objet Tkinter ne doit être détruit hors du fil principal.** Tkinter
   n'obéit qu'au fil principal : un fil d'arrière-plan qui détruit une image ou
   une variable Tkinter (via le ramasse-miettes) reste bloqué plus d'une
@@ -376,9 +426,24 @@ implémentés :
 - **Bords du bandeau lissés** (suréchantillonnage ×4 puis réduction) : un bandeau
   incliné ne doit pas présenter de marches d'escalier. L'intérieur reste
   entièrement noir, et le rendu à l'écran est identique à celui du fichier.
-- **Renommage** : numérotation `1, 2, 3…` **sans zéros devant**, extension
-  d'origine conservée, dans l'**ordre chronologique strict** : `1` = le fichier
-  le plus ancien par date et heure, `n` = le plus récent, et aucun autre ordre.
+- **Renommage** : selon le format choisi (`renommage.py`), extension
+  d'origine conservée, dans l'**ordre chronologique strict** : le premier nom
+  = le fichier le plus ancien par date et heure, le dernier = le plus récent,
+  et aucun autre ordre. **Classer par nom doit toujours donner cet ordre** :
+  dates écrites année-mois-jour-heure, numéros du format « événement »
+  complétés par des zéros, photos d'une même seconde numérotées `-1`, `-2`
+  **avant** le code (sans quoi c'est le code qui les classerait). Le format
+  « numéros » reste `1, 2, 3…` **sans zéros devant** (règle d'origine [7.2]).
+  **Le code** (4 caractères, base32) est tiré de la taille du fichier et de
+  ses 64 premiers Ko : identique pour une même photo sur deux ordinateurs,
+  différent pour deux photos de la même seconde ; lire le fichier entier
+  prendrait des minutes sur 3 000 photos. Dans les formats par date, les
+  fichiers d'une même prise de vue (même nom sans l'extension : photo et
+  RAW, photo et vidéo) reçoivent le même nom, d'après la date de la photo.
+  Un renommage qui échoue en route rend leur ancien nom à tous les fichiers
+  (`renommer_en_deux_passes`). « Aucun renommage » saute cette étape ; les
+  RAW et vidéos sont quand même mis de côté. Un événement créé avant le choix
+  du format est « numéros » (`Suivi.renommage`).
   La date retenue est celle de **prise de vue (EXIF `DateTimeOriginal`)**,
   puis `DateTime` si la première manque ou est illisible (« 0000:00:00… ») ;
   avec son écart au temps universel (`OffsetTimeOriginal`, `OffsetTime`) quand
@@ -452,8 +517,10 @@ implémentés :
   cadre à chaque déplacement, faute de quoi il disparaîtrait de l'écran sans
   avoir été retiré.
 - **Copie de sauvegarde avant modification** : à la censure et au rognage, une
-  copie intacte est conservée dans un dossier temporaire avant d'écrire, pour
-  permettre l'annulation ; ce dossier est vidé à la fermeture. Chaque copie
+  copie intacte est conservée dans `_sauvegardes_temporaires` avant d'écrire,
+  pour permettre l'annulation ; ce dossier n'est vidé que par « Terminer la
+  session » (il l'était à chaque fermeture avant le 16 novembre 2026, d'où
+  son nom, gardé pour les événements déjà commencés). Chaque copie
   porte un numéro unique, pour qu'une photo modifiée deux fois n'écrase jamais
   sa sauvegarde précédente. **Aucune photo d'origine ne
   doit être perdue en cours de session.** [9.6]
@@ -507,7 +574,19 @@ Mise en œuvre :
   (`ecritures.py`). Règle : avant de déplacer, copier ou restaurer un fichier
   depuis la fenêtre, attendre son enregistrement en cours, sans figer la
   fenêtre (voir section 6) ; à la fermeture, attendre tous les
-  enregistrements avant de vider le dossier des sauvegardes.
+  enregistrements.
+- **Démarrage** (demande de l'utilisateur, 16 novembre 2026 : « beaucoup trop
+  lent »). Un lancement démarrait Python quatre fois, dont deux chargeaient
+  OpenCV. Désormais : les `lancer.*` appellent `demarrer.py` avec le Python de
+  `venv/` s'il existe, qui ouvre le logiciel **dans le même processus** ; les
+  bibliothèques ne sont plus essayées qu'après un échec (code de sortie 3 =
+  environnement à réparer). **`main.py` n'importe en tête que des modules
+  légers** (mesuré : 0,04 s au lieu de 0,14 à 0,54 s) : ni Pillow ni OpenCV.
+  Le reste est importé par un fil d'arrière-plan une fois l'écran d'accueil
+  dessiné, et par des `import` placés dans les fonctions de `main.py`,
+  exception assumée à l'usage du projet. Ne pas ajouter d'import lourd en
+  tête de `main.py`, `suivi.py`, `preferences.py`, `renommage.py` ou
+  `theme.py`.
 - **Le chargeur ne relit jamais une photo en cours d'enregistrement** : il
   attend la fin de son écriture (`attendre_ecriture`), sans quoi une photo
   pivotée, sortie du cache puis revue, revenait sans sa rotation. Chaque
@@ -583,6 +662,7 @@ Règles du réenregistrement (`images.py`), toutes constatées par les essais :
 6. Des tests exécutables : `verifier_installation.py` pour l'installation,
    `tester_bandeau.py` pour la géométrie du bandeau, `tester_rognage.py` pour
    celle du cadre de rognage, `tester_rangement.py` pour ce que deviennent
-   les fichiers (préparation, tri, annulation, fichiers bloqués, chargement,
+   les fichiers (préparation, formats de nom, tri, annulation photo par
+   photo, statistiques, fin de session, fichiers bloqués, chargement,
    bandeaux à la souris, gestion des dossiers) et `tester_formats.py` pour le
    réenregistrement de chaque format. Tous doivent passer avant de livrer.

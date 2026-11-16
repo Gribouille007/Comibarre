@@ -20,7 +20,11 @@ temporaire, puis verifient, fichier par fichier, ce que deviennent les photos :
 6. les bandeaux : rattachement d'un clic au bon visage, gestes de la souris ;
 7. les photos revenues dans le dossier source, comme le fait OneDrive ;
 8. la gestion des dossiers de tri depuis le menu ;
-9. les regles des noms et des touches.
+9. les regles des noms et des touches ;
+10. les formats de nom des photos, et le renommage d'un evenement existant ;
+11. l'annulation photo par photo, gardee d'une session a l'autre ;
+12. les statistiques de la fenetre de tri ;
+13. la fin de la session : tri definitif, dossiers vides supprimes.
 
 Une vraie fenetre de tri est ouverte, mais rendue invisible, et les messages
 sont interceptes au lieu d'etre affiches. Aucun fichier de l'utilisateur n'est
@@ -46,10 +50,13 @@ DOSSIER_ESSAI = tempfile.mkdtemp(prefix="tester_rangement_")
 preferences.CHEMIN_PREFERENCES = os.path.join(DOSSIER_ESSAI, "preferences.json")
 
 import dossiers_tri                                   # noqa: E402
+import fin_de_session                                 # noqa: E402
 import gestion_dossiers                               # noqa: E402
 import preparation                                    # noqa: E402
 import rangement                                      # noqa: E402
 import remise_en_place                                # noqa: E402
+import renommage                                      # noqa: E402
+import renommage_evenement                            # noqa: E402
 import theme                                          # noqa: E402
 from bandeaux import Bandeau                          # noqa: E402
 from censure import OutilBandeaux                     # noqa: E402
@@ -57,6 +64,7 @@ from dossiers import photos_du_dossier, probleme_du_nom  # noqa: E402
 from fichiers import deplacer_fichier, renommer_dossier  # noqa: E402
 from images import ChargeurAnticipe                   # noqa: E402
 from suivi import Suivi                               # noqa: E402
+from revue import preparer_revue                      # noqa: E402
 from tri import preparer_tri                          # noqa: E402
 from visages import Visage, visage_le_plus_proche     # noqa: E402
 
@@ -104,7 +112,7 @@ def photo(chemin, couleur, date=None):
     image.save(chemin, exif=exif.tobytes())
 
 
-def nouvel_evenement(nom_dossier="Import", dossiers=None):
+def nouvel_evenement(nom_dossier="Import", dossiers=None, nom_format="numero"):
     """Dossier de photos neuf, renomme « Mariage » et prepare comme le fait le logiciel."""
     parent = tempfile.mkdtemp(dir=DOSSIER_ESSAI)
     source = os.path.join(parent, nom_dossier)
@@ -121,7 +129,8 @@ def nouvel_evenement(nom_dossier="Import", dossiers=None):
 
     evenement = renommer_dossier(source, "Mariage")
     suivi = Suivi.creer(evenement, "Mariage", dossiers or [{"nom": "A garder", "touche": "1"},
-                                                          {"nom": "Ratees", "touche": "2"}])
+                                                          {"nom": "Ratees", "touche": "2"}],
+                        renommage=nom_format)
     suivi.enregistrer()
     rapport = preparation.preparer(suivi)
     return suivi, rapport
@@ -146,6 +155,25 @@ def attendre(racine, secondes):
     while time.time() < fin:
         racine.update()
         time.sleep(0.01)
+
+
+def presser(racine, fenetre, touche):
+    """Presse une touche une fois la photo affichee, puis attend que son effet soit visible.
+
+    Une touche de tri pressee pendant « Chargement... » est ignoree, a
+    dessein : sur un ordinateur occupe, une attente fixe ne suffit pas toujours.
+    """
+    for _ in range(2):
+        fin = time.time() + 5
+        while time.time() < fin and (fenetre.attente is not None
+                                     or fenetre.attente_enregistrement is not None
+                                     or fenetre.ecritures.en_cours()):
+            racine.update()
+            time.sleep(0.01)
+        if touche is not None:
+            fenetre._touche(touche)
+            touche = None
+            attendre(racine, 0.15)
 
 
 # ----------------------------------------------------------------------
@@ -188,7 +216,8 @@ def test_preparation():
     with open(os.path.join(parent, "b.cr2"), "wb") as fichier:
         fichier.write(b"nouveau RAW")
     os.utime(os.path.join(parent, "b.cr2"), (2e9, 2e9))      # plus recent que a.jpg
-    suivi_raw = Suivi.creer(parent, "Raw", [{"nom": "A garder", "touche": "1"}])
+    suivi_raw = Suivi.creer(parent, "Raw", [{"nom": "A garder", "touche": "1"}],
+                            renommage="numero")
     rapport = preparation.preparer(suivi_raw)
     with open(os.path.join(parent, "RAW", "2.cr2"), "rb") as fichier:
         intact = fichier.read() == b"ancien RAW"
@@ -233,7 +262,8 @@ def test_preparation():
     photo(os.path.join(parent, "b.jpg"), (20, 20, 20), "2026:01:01 00:00:01")
     os.makedirs(os.path.join(parent, "2.jpg"))
     try:
-        preparation.preparer(Suivi.creer(parent, "Bloque", [{"nom": "A", "touche": "1"}]))
+        preparation.preparer(Suivi.creer(parent, "Bloque", [{"nom": "A", "touche": "1"}],
+                                         renommage="numero"))
         refuse = False
     except FileExistsError:
         refuse = True
@@ -400,12 +430,12 @@ def test_robustesse(racine):
         verifier("annulation impossible : l'utilisateur est prevenu",
                  ("showerror", "Annulation impossible") in messages, messages)
         verifier("annulation impossible : l'action reste a annuler",
-                 len(suivi.tri["historique"]) == 1 and contenu(garder) == ["2.jpg"])
+                 len(suivi.historique) == 1 and contenu(garder) == ["2.jpg"])
         fenetre._touche(Touche("BackSpace"))
         attendre(racine, 0.2)
         verifier("rappuyer sur Retour arriere annule bien le rangement",
                  "2.jpg" in contenu(dossier) and not contenu(garder)
-                 and not suivi.tri["historique"])
+                 and not suivi.historique)
 
         # Une touche pendant qu'un enregistrement se termine : la fenetre ne
         # se fige pas, et l'action est faite des qu'il est fini.
@@ -491,7 +521,7 @@ def test_echecs(racine):
         attendre(racine, 0.4)
         fenetre._touche(Touche("Left"))
         attendre(racine, 0.4)
-        nombre_d_actions = len(suivi.tri["historique"])
+        nombre_d_actions = len(suivi.historique)
         vrai_supprimer = rangement.supprimer_fichier
         rangement.supprimer_fichier = refuser
         try:
@@ -504,11 +534,11 @@ def test_echecs(racine):
                  image is not None and sum(image.getpixel((160, 120))) > 60,
                  image and image.getpixel((160, 120)))
         verifier("annulation a moitie faite : l'action reste a terminer",
-                 len(suivi.tri["historique"]) == nombre_d_actions)
+                 len(suivi.historique) == nombre_d_actions)
         fenetre._touche(Touche("BackSpace"))
         attendre(racine, 0.3)
         verifier("et rappuyer la termine",
-                 len(suivi.tri["historique"]) == nombre_d_actions - 1)
+                 len(suivi.historique) == nombre_d_actions - 1)
     finally:
         if fenetre.fenetre.winfo_exists():
             fenetre.quitter()
@@ -792,7 +822,365 @@ def test_regles():
     suivi.donnees["tri"] = {}
     suivi.enregistrer()
     verifier("un suivi ancien, incomplet, est complete",
-             Suivi.charger(dossier).tri.get("historique") == [])
+             Suivi.charger(dossier).historique == [])
+
+
+# ----------------------------------------------------------------------
+# 10. Formats de nom des photos
+# ----------------------------------------------------------------------
+
+def dossier_de_photos(photos):
+    """Dossier neuf contenant les photos donnees : {nom: (couleur, date de prise de vue)}."""
+    dossier = tempfile.mkdtemp(dir=DOSSIER_ESSAI)
+    for nom, (couleur, date) in photos.items():
+        photo(os.path.join(dossier, nom), couleur, date)
+    return dossier
+
+
+def preparer_au_format(dossier, nom_format, nom_evenement="Fete"):
+    suivi = Suivi.creer(dossier, nom_evenement, [{"nom": "A garder", "touche": "1"}],
+                        renommage=nom_format)
+    suivi.enregistrer()
+    preparation.preparer(suivi)
+    return suivi
+
+
+def test_formats_de_nom():
+    print("\n10. Formats de nom des photos")
+    photos = {"IMG_3.jpg": ((30, 0, 0), "2026:08:24 14:03:31"),
+              "IMG_1.jpg": ((10, 0, 0), "2026:08:24 14:03:27"),
+              "IMG_2.jpg": ((20, 0, 0), "2026:08:24 14:03:27"),     # meme seconde que IMG_1
+              "IMG_4.jpg": ((40, 0, 0), "2026:08:25 09:00:00")}
+
+    # Date, heure et code : le format par defaut.
+    verifier("le format par defaut est « date, heure et code »",
+             Suivi.creer(DOSSIER_ESSAI, "x", []).renommage == renommage.FORMAT_DATE_CODE)
+    dossier = dossier_de_photos(photos)
+    with open(os.path.join(dossier, "IMG_3.CR2"), "wb") as fichier:
+        fichier.write(b"RAW de la photo 3")
+    suivi = preparer_au_format(dossier, renommage.FORMAT_DATE_CODE)
+    noms = suivi.tri["photos"]
+    verifier("date et code : quatre photos, dans l'ordre des prises de vue",
+             [nom[:19] for nom in noms] == ["2026-08-24_14-03-27", "2026-08-24_14-03-27",
+                                            "2026-08-24_14-03-31", "2026-08-25_09-00-00"],
+             noms)
+    verifier("date et code : classer par nom donne l'ordre chronologique",
+             sorted(noms) == noms and sorted(noms, key=str.lower) == noms)
+    verifier("date et code : chaque nom finit par un code de quatre caracteres",
+             all(len(os.path.splitext(nom)[0].rsplit("_", 1)[1]) == 4 for nom in noms), noms)
+    verifier("deux photos de la meme seconde sont numerotees dans leur ordre",
+             noms[0][19:22] == "-1_" and noms[1][19:22] == "-2_", noms[:2])
+    couleurs = [Image.open(os.path.join(dossier, nom)).convert("RGB").getpixel((5, 5))[0]
+                for nom in noms]
+    verifier("chaque photo a recu le nom de sa propre date",
+             [round(couleur, -1) for couleur in couleurs] == [10, 20, 30, 40], couleurs)
+    raw = contenu(os.path.join(dossier, "RAW"))
+    verifier("le RAW porte le meme nom que sa photo",
+             len(raw) == 1 and os.path.splitext(raw[0])[0] == os.path.splitext(noms[2])[0],
+             raw)
+
+    # Les memes photos preparees sur un autre ordinateur recoivent les memes noms ;
+    # une autre photo prise dans la meme seconde en recoit un different.
+    ailleurs = preparer_au_format(dossier_de_photos(photos), renommage.FORMAT_DATE_CODE)
+    verifier("une meme photo recoit le meme nom sur deux ordinateurs",
+             ailleurs.tri["photos"] == noms, ailleurs.tri["photos"])
+    autre = preparer_au_format(dossier_de_photos(
+        {"DSC_9.jpg": ((200, 200, 0), "2026:08:25 09:00:00")}), renommage.FORMAT_DATE_CODE)
+    verifier("deux appareils, meme seconde : deux noms differents",
+             autre.tri["photos"][0] != noms[3]
+             and autre.tri["photos"][0][:19] == noms[3][:19], autre.tri["photos"])
+
+    # Date et heure seules.
+    suivi = preparer_au_format(dossier_de_photos(photos), renommage.FORMAT_DATE)
+    verifier("date seule : noms sans code, rafale numerotee",
+             suivi.tri["photos"] == ["2026-08-24_14-03-27-1.jpg", "2026-08-24_14-03-27-2.jpg",
+                                     "2026-08-24_14-03-31.jpg", "2026-08-25_09-00-00.jpg"],
+             suivi.tri["photos"])
+
+    # Nom de l'evenement et numero.
+    suivi = preparer_au_format(dossier_de_photos(photos), renommage.FORMAT_EVENEMENT)
+    verifier("nom de l'evenement : numeros completes par des zeros",
+             suivi.tri["photos"] == ["Fete_0001.jpg", "Fete_0002.jpg", "Fete_0003.jpg",
+                                     "Fete_0004.jpg"], suivi.tri["photos"])
+
+    # Aucun renommage : les noms d'origine restent, classes comme dans un gestionnaire.
+    photos_longues = dict(photos)
+    photos_longues["IMG_10.jpg"] = ((50, 0, 0), "2026:08:26 09:00:00")
+    dossier = dossier_de_photos(photos_longues)
+    with open(os.path.join(dossier, "film.mp4"), "wb") as fichier:
+        fichier.write(b"video")
+    suivi = preparer_au_format(dossier, renommage.FORMAT_AUCUN)
+    verifier("ne pas renommer : les photos gardent leur nom",
+             suivi.tri["photos"] == ["IMG_1.jpg", "IMG_2.jpg", "IMG_3.jpg", "IMG_4.jpg",
+                                     "IMG_10.jpg"], suivi.tri["photos"])
+    verifier("ne pas renommer : la video est quand meme mise de cote",
+             contenu(os.path.join(dossier, "Videos")) == ["film.mp4"])
+
+    # Un renommage qui echoue en route rend leur nom a tous les fichiers.
+    dossier = dossier_de_photos(photos)
+    avant = contenu(dossier)
+    vrai_deplacer = renommage.deplacer_fichier
+    appels = {"nombre": 0}
+
+    def echouer_au_sixieme(source, destination):
+        appels["nombre"] += 1
+        if appels["nombre"] == 6:
+            raise PermissionError(13, "fichier utilise par un autre programme")
+        vrai_deplacer(source, destination)
+    renommage.deplacer_fichier = echouer_au_sixieme
+    try:
+        preparation.renommer_photos(dossier, avant, None, renommage.FORMAT_DATE, "Fete")
+        echec = False
+    except OSError:
+        echec = True
+    finally:
+        renommage.deplacer_fichier = vrai_deplacer
+    verifier("renommage interrompu : tous les fichiers reprennent leur nom",
+             echec and contenu(dossier) == avant, contenu(dossier))
+
+    verifier("classement : 2 avant 10, et les dates dans l'ordre",
+             sorted(["10.jpg", "2.jpg", "IMG_10.jpg", "IMG_9.jpg"],
+                    key=renommage.cle_de_classement)
+             == ["2.jpg", "10.jpg", "IMG_9.jpg", "IMG_10.jpg"])
+
+
+def test_renommage_d_un_evenement(racine):
+    print("\n10 bis. Renommer les photos d'un evenement existant")
+    suivi, _ = nouvel_evenement()
+    dossier = suivi.dossier_evenement
+    garder = os.path.join(dossier, "A garder")
+    fenetre = ouvrir_le_tri(racine, suivi)
+    try:
+        # Photo 1 barree puis rangee, photo 2 rangee telle quelle.
+        fenetre.outil.bandeaux_manuels.append(Bandeau(160, 120, 120, 40, 0))
+        presser(racine, fenetre, Touche("1", "1"))
+        presser(racine, fenetre, Touche("1", "1"))
+    finally:
+        fenetre.quitter()
+        attendre(racine, 0.3)
+    verifier("avant : photos numerotees, version sans barre gardee",
+             contenu(garder) == ["1.jpg", "2.jpg"]
+             and contenu(os.path.join(garder, "Sans-barre")) == ["1.jpg"])
+
+    nombre = renommage_evenement.renommer_evenement(suivi, renommage.FORMAT_DATE_CODE)
+    rangees = contenu(garder)
+    verifier("toutes les photos de l'evenement sont renommees",
+             nombre == 8 and all(nom.startswith("2026-05-01_10-00-0") for nom in rangees)
+             and all(nom.startswith("2026-05-01_10-00-0") for nom in photos_du_dossier(dossier)),
+             (nombre, rangees, contenu(dossier)))
+    verifier("la version sans barre porte le meme nouveau nom que sa photo",
+             contenu(os.path.join(garder, "Sans-barre")) == rangees[:1],
+             contenu(os.path.join(garder, "Sans-barre")))
+    verifier("la video mise de cote est renommee aussi",
+             not contenu(os.path.join(dossier, "Videos"))[0].startswith("7"),
+             contenu(os.path.join(dossier, "Videos")))
+    verifier("le suivi suit les nouveaux noms",
+             sorted(suivi.rangements) == rangees
+             and sorted(action["fichier"] for action in suivi.historique) == rangees
+             and Suivi.charger(dossier).renommage == renommage.FORMAT_DATE_CODE)
+
+    # L'annulation fonctionne toujours apres le renommage, en revue.
+    preparer_revue(suivi, "A garder")
+    fenetre = rangement.FenetreRangement(racine, suivi, suivi.revue, "A garder", "essai")
+    fenetre.fenetre.attributes("-alpha", 0.0)
+    attendre(racine, 0.5)
+    try:
+        presser(racine, fenetre, Touche("BackSpace"))
+        verifier("apres renommage, Retour arriere ramene la photo, sans ses bandeaux",
+                 rangees[0] in contenu(dossier)
+                 and sum(pixel_sur_le_disque(os.path.join(dossier, rangees[0]))) > 60
+                 and not os.path.isdir(os.path.join(garder, "Sans-barre")),
+                 contenu(dossier))
+    finally:
+        fenetre.quitter()
+        attendre(racine, 0.3)
+
+    # Revenir aux numeros reste possible.
+    renommage_evenement.renommer_evenement(suivi, renommage.FORMAT_NUMERO)
+    verifier("retour au format numerote",
+             photos_du_dossier(dossier) == ["1.jpg", "3.jpg", "4.jpg", "5.jpg", "6.jpg"]
+             and contenu(garder) == ["2.jpg"], (photos_du_dossier(dossier), contenu(garder)))
+
+
+# ----------------------------------------------------------------------
+# 11. Annulation photo par photo, gardee d'une session a l'autre
+# ----------------------------------------------------------------------
+
+def test_annulation_par_photo(racine):
+    print("\n11. Annulation photo par photo")
+    suivi, _ = nouvel_evenement()
+    dossier = suivi.dossier_evenement
+    garder = os.path.join(dossier, "A garder")
+    fenetre = ouvrir_le_tri(racine, suivi)
+    try:
+        for _ in range(3):
+            presser(racine, fenetre, Touche("1", "1"))
+        verifier("trois photos rangees", contenu(garder) == ["1.jpg", "2.jpg", "3.jpg"],
+                 (contenu(garder), messages[-3:]))
+        verifier("le rappel annonce ce que Retour arriere annulera",
+                 "annuler le rangement de 3.jpg dans « A garder »"
+                 in fenetre.etiquette_rappel.cget("text"),
+                 fenetre.etiquette_rappel.cget("text").splitlines()[-1][:90])
+
+        # Revenir sur la photo 1 avec la fleche, et annuler CE rangement-la.
+        for _ in range(3):
+            presser(racine, fenetre, Touche("Left"))
+        verifier("revenu sur la photo 1, le rappel la designe",
+                 "annuler le rangement de 1.jpg" in fenetre.etiquette_rappel.cget("text"))
+        presser(racine, fenetre, Touche("BackSpace"))
+        verifier("Retour arriere annule le rangement de la photo affichee, pas le dernier",
+                 contenu(garder) == ["2.jpg", "3.jpg"] and "1.jpg" in contenu(dossier),
+                 contenu(garder))
+        verifier("les autres actions restent annulables",
+                 [action["fichier"] for action in suivi.historique] == ["2.jpg", "3.jpg"])
+
+        # Sans navigation, Retour arriere remonte les actions de la session.
+        presser(racine, fenetre, Touche("1", "1"))            # range de nouveau la photo 1
+        presser(racine, fenetre, Touche("BackSpace"))
+        presser(racine, fenetre, Touche("BackSpace"))
+        verifier("sans fleche, Retour arriere annule les dernieres actions, dans l'ordre",
+                 contenu(garder) == ["2.jpg"], contenu(garder))
+
+        # Photo 4 rognee, puis photo 3 rangee : la photo 4 s'affiche, et Retour
+        # arriere doit ramener la photo 3, pas defaire le rognage de la 4.
+        presser(racine, fenetre, Touche("Right"))             # de la photo 3 a la photo 4
+        fenetre.commencer_rognage()
+        fenetre.visionneuse.cadre = (0.0, 0.0, 160.0, 120.0)
+        fenetre.rogner()
+        attendre(racine, 0.6)
+        presser(racine, fenetre, Touche("Left"))
+        presser(racine, fenetre, Touche("1", "1"))
+        presser(racine, fenetre, Touche("BackSpace"))
+        with Image.open(os.path.join(dossier, "4.jpg")) as image:
+            largeur = image.width
+        verifier("apres un rangement, Retour arriere l'annule, sans toucher a la photo suivante",
+                 "3.jpg" in contenu(dossier) and largeur == 160, (contenu(garder), largeur))
+    finally:
+        fenetre.quitter()
+        attendre(racine, 0.3)
+
+    # Nouvelle session : la photo 4, rognee, se retrouve intacte par Retour arriere.
+    sauvegardes = suivi.chemin_dossier_temporaire()
+    verifier("fermer la fenetre garde les copies intactes et l'historique",
+             len(contenu(sauvegardes)) == 1
+             and [a["action"] for a in Suivi.charger(dossier).historique]
+             == ["deplacement", "rognage"], Suivi.charger(dossier).historique)
+    suivi = Suivi.charger(dossier)
+    fenetre = ouvrir_le_tri(racine, suivi)
+    try:
+        fenetre.position = fenetre.photos.index("4.jpg")
+        fenetre.afficher_photo_courante()
+        attendre(racine, 0.4)
+        presser(racine, fenetre, Touche("BackSpace"))
+        with Image.open(os.path.join(dossier, "4.jpg")) as image:
+            largeur = image.width
+        verifier("a la session suivante, le rognage d'une ancienne photo s'annule encore",
+                 largeur == 320 and not os.path.isdir(sauvegardes) or
+                 (largeur == 320 and not contenu(sauvegardes)), largeur)
+    finally:
+        fenetre.quitter()
+        attendre(racine, 0.3)
+
+    # Un suivi d'avant l'historique unique est repris sans rien perdre.
+    donnees = Suivi.charger(dossier).donnees
+    del donnees["historique"]
+    donnees["tri"]["historique"] = [{"action": "deplacement", "fichier": "2.jpg",
+                                     "depuis": None, "dossier": "A garder", "index": 1,
+                                     "sauvegarde": None, "sans_barre": None}]
+    ancien = Suivi(dossier, donnees)
+    ancien.enregistrer()
+    repris = Suivi.charger(dossier)
+    verifier("l'historique d'un ancien suivi est repris",
+             [action["fichier"] for action in repris.historique] == ["2.jpg"]
+             and "historique" not in repris.tri)
+
+
+# ----------------------------------------------------------------------
+# 12 et 13. Statistiques, fin de la session
+# ----------------------------------------------------------------------
+
+def test_statistiques_et_fin(racine):
+    print("\n12. Statistiques de la fenetre de tri")
+    suivi, _ = nouvel_evenement()
+    dossier = suivi.dossier_evenement
+    garder = os.path.join(dossier, "A garder")
+    fenetre = ouvrir_le_tri(racine, suivi)
+    try:
+        verifier("au depart : tout est a trier",
+                 fenetre.etiquette_stats.cget("text").startswith("A trier : 6")
+                 and "Rangees : 0 sur 6 (0 %)" in fenetre.etiquette_stats.cget("text"),
+                 fenetre.etiquette_stats.cget("text"))
+        presser(racine, fenetre, Touche("1", "1"))
+        presser(racine, fenetre, Touche("2", "2"))
+        fenetre.outil.bandeaux_manuels.append(Bandeau(160, 120, 120, 40, 0))
+        presser(racine, fenetre, Touche("1", "1"))
+        stats = fenetre.etiquette_stats.cget("text")
+        verifier("apres trois rangements : le reste et le pourcentage suivent",
+                 "A trier : 3" in stats and "Rangees : 3 sur 6 (50 %)" in stats
+                 and "Cette session : 3" in stats and "3 action(s) annulable(s)" in stats,
+                 stats)
+        rappel = fenetre.etiquette_rappel.cget("text")
+        verifier("chaque dossier affiche son nombre de photos",
+                 "[1] A garder (2)" in rappel and "[2] Ratees (1)" in rappel,
+                 rappel.splitlines()[0])
+        presser(racine, fenetre, Touche("BackSpace"))
+        verifier("une annulation remet les compteurs a jour",
+                 "A trier : 4" in fenetre.etiquette_stats.cget("text")
+                 and "[1] A garder (1)" in fenetre.etiquette_rappel.cget("text"),
+                 fenetre.etiquette_stats.cget("text"))
+        for _ in range(4):
+            presser(racine, fenetre, Touche("1", "1"))
+        verifier("le rythme est annonce apres quelques photos",
+                 "Rythme :" in fenetre.etiquette_stats.cget("text"),
+                 fenetre.etiquette_stats.cget("text"))
+        # Photo 3 barree : sa copie intacte doit exister jusqu'a la fin de session.
+        presser(racine, fenetre, Touche("Left"))
+        fenetre.outil.bandeaux_manuels.append(Bandeau(160, 120, 120, 40, 0))
+        presser(racine, fenetre, Touche("Return"))
+    finally:
+        fenetre.quitter()
+        attendre(racine, 0.3)
+
+    print("\n13. Fin de la session")
+    # « Ratees » est videe, et ne contient plus qu'un fichier depose par macOS.
+    deplacer_fichier(os.path.join(dossier, "Ratees", "2.jpg"), os.path.join(garder, "2.jpg"))
+    with open(os.path.join(dossier, "Ratees", ".DS_Store"), "wb") as fichier:
+        fichier.write(b"finder")
+    bilan = fin_de_session.bilan(suivi)
+    verifier("le bilan annonce ce qui sera definitif",
+             bilan["annulables"] == len(suivi.historique) > 0 and bilan["octets"] > 0
+             and bilan["dossiers_vides"] == ["Ratees"], bilan)
+    supprimes, refuses = fin_de_session.terminer(suivi)
+    verifier("terminer supprime le dossier vide, malgre le fichier du systeme",
+             supprimes == ["Ratees"] and not refuses
+             and not os.path.exists(os.path.join(dossier, "Ratees")))
+    verifier("terminer garde les dossiers qui contiennent des photos",
+             len(contenu(garder)) == 6 and os.path.isdir(os.path.join(dossier, "Videos")))
+    verifier("terminer efface les copies intactes et vide l'historique",
+             not os.path.exists(suivi.chemin_dossier_temporaire())
+             and Suivi.charger(dossier).historique == [])
+    verifier("les versions sans barre sont gardees",
+             len(contenu(os.path.join(garder, "Sans-barre"))) == 1)
+    verifier("le dossier supprime reste dans la liste de l'evenement",
+             suivi.dossier_tri_pour_touche("2") == "Ratees")
+
+    # Apres la fin de session : plus rien a annuler, et le dossier supprime
+    # est recree des qu'on y range une photo.
+    preparer_revue(suivi, "A garder")
+    fenetre = rangement.FenetreRangement(racine, suivi, suivi.revue, "A garder", "essai")
+    fenetre.fenetre.attributes("-alpha", 0.0)
+    attendre(racine, 0.5)
+    try:
+        verifier("apres la fin de session, il n'y a plus rien a annuler",
+                 "rien a annuler" in fenetre.etiquette_rappel.cget("text"))
+        presser(racine, fenetre, Touche("BackSpace"))
+        verifier("et Retour arriere ne touche a rien", len(contenu(garder)) == 6)
+        presser(racine, fenetre, Touche("2", "2"))
+        verifier("ranger dans un dossier supprime le recree",
+                 len(contenu(os.path.join(dossier, "Ratees"))) == 1)
+    finally:
+        fenetre.quitter()
+        attendre(racine, 0.3)
 
 
 # ----------------------------------------------------------------------
@@ -814,6 +1202,10 @@ def main():
         test_photos_revenues(suivi)
         test_gestion(suivi)
         test_regles()
+        test_formats_de_nom()
+        test_renommage_d_un_evenement(racine)
+        test_annulation_par_photo(racine)
+        test_statistiques_et_fin(racine)
     finally:
         racine.destroy()
         shutil.rmtree(DOSSIER_ESSAI, ignore_errors=True)

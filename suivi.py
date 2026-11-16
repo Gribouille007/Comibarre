@@ -24,13 +24,16 @@ leur organisation.
 import os
 
 from fichiers import ecrire_json, lire_json
+from renommage import FORMAT_NUMERO, FORMAT_PAR_DEFAUT
 
 # Nom du fichier de suivi, cree a la racine du dossier de l'evenement.
 NOM_FICHIER_SUIVI = "suivi.json"
 
 # Dossier ou sont conservees les copies intactes des photos avant censure ou
-# rognage, pour permettre l'annulation (section 9.6). Vide a la fermeture de
-# la fenetre.
+# rognage, pour permettre l'annulation (section 9.6). Il est garde d'une
+# session a l'autre, et n'est vide que lorsque l'utilisateur declare la
+# session terminee (voir fin_de_session.py). Son nom date du temps ou il etait
+# vide a chaque fermeture ; il est garde pour les evenements deja commences.
 NOM_DOSSIER_TEMPORAIRE = "_sauvegardes_temporaires"
 
 # Version des fichiers de suivi ecrits par ce programme (voir l'entete).
@@ -49,11 +52,13 @@ class Suivi:
     # ------------------------------------------------------------------
 
     @classmethod
-    def creer(cls, dossier_evenement, nom_evenement, dossiers_tri):
+    def creer(cls, dossier_evenement, nom_evenement, dossiers_tri,
+              renommage=FORMAT_PAR_DEFAUT):
         """Construit un suivi tout neuf pour un evenement qui demarre.
 
         `dossier_evenement` est le dossier des photos lui-meme (version 2).
         `dossiers_tri` est une liste de dictionnaires {"nom", "touche"}.
+        `renommage` est le format des noms des photos (voir renommage.py).
         """
         donnees = {
             "version": VERSION,
@@ -67,10 +72,11 @@ class Suivi:
             # Passe a True une fois la preparation automatique terminee ; elle
             # ne doit jamais etre rejouee ensuite (sections 5 et 10).
             "preparation_faite": False,
+            # Format des noms donnes aux photos par la preparation.
+            "renommage": renommage,
             "tri": {
                 "photos": [],      # noms de fichiers, dans l'ordre d'affichage
                 "position": 0,     # index de la photo courante
-                "historique": [],  # rangements effectues, pour l'annulation
                 "terminee": False,
             },
             "revue": Suivi._revue_vide(),
@@ -79,6 +85,8 @@ class Suivi:
             "mode_barrer": False,
             # Dossier de tri choisi pour chaque photo : voir `rangements`.
             "rangements": {},
+            # Tout ce qui peut encore etre annule : voir `historique`.
+            "historique": [],
         }
         return cls(dossier_evenement, donnees)
 
@@ -88,7 +96,6 @@ class Suivi:
             "dossier": None,       # nom du dossier en cours de revue
             "photos": [],
             "position": 0,
-            "historique": [],      # deplacements et rognages, pour l'annulation
             "terminee": False,
         }
 
@@ -111,15 +118,22 @@ class Suivi:
                            for dossier in donnees["dossiers_tri"])
                 or not isinstance(donnees.get("revue", {}), dict)
                 or not isinstance(donnees.get("dossiers_dupliques", []), list)
-                or not isinstance(donnees.get("rangements", {}), dict)):
+                or not isinstance(donnees.get("rangements", {}), dict)
+                or not isinstance(donnees.get("historique", []), list)):
             raise ValueError("Le fichier de suivi est incomplet ou abime.")
         # Les cles d'etape manquantes sont completees plutot que refusees : un
         # fichier ecrit par une version plus ancienne peut ne pas toutes les
         # avoir, et le tri s'arretait sinon plus loin sur une cle absente.
+        historique = donnees.setdefault("historique", [])
         for etape in (donnees["tri"], donnees.setdefault("revue", cls._revue_vide())):
-            for cle, valeur in (("photos", []), ("position", 0), ("historique", []),
-                                ("terminee", False)):
+            for cle, valeur in (("photos", []), ("position", 0), ("terminee", False)):
                 etape.setdefault(cle, valeur)
+            # Avant le 16 novembre 2026, le tri et la revue avaient chacun leur
+            # historique : ils sont reunis dans celui de l'evenement.
+            anciennes = etape.pop("historique", [])
+            if isinstance(anciennes, list):
+                historique.extend(action for action in anciennes
+                                  if isinstance(action, dict) and "fichier" in action)
         return cls(dossier_evenement, donnees)
 
     @staticmethod
@@ -155,6 +169,18 @@ class Suivi:
         if self.donnees.get("version", 1) >= 2:
             return self.dossier_evenement
         return os.path.dirname(self.dossier_evenement)
+
+    @property
+    def renommage(self):
+        """Format des noms des photos (renommage.py).
+
+        Les evenements crees avant le choix du format etaient tous numerotes.
+        """
+        return self.donnees.get("renommage", FORMAT_NUMERO)
+
+    @renommage.setter
+    def renommage(self, nom_format):
+        self.donnees["renommage"] = nom_format
 
     @property
     def dossiers_tri(self):
@@ -226,6 +252,47 @@ class Suivi:
         """Chemin du dossier des copies de sauvegarde (censure et rognage)."""
         return os.path.join(self.dossier_evenement, NOM_DOSSIER_TEMPORAIRE)
 
+    def chemin_sauvegarde(self, action):
+        """Chemin de la copie intacte gardee par une action de l'historique, ou None.
+
+        L'historique ne retient que le nom du fichier de sauvegarde : le
+        dossier de l'evenement peut etre deplace ou renomme d'une session a
+        l'autre, et un chemin complet ne menerait alors plus nulle part.
+        (`basename` relit aussi les chemins complets des anciens suivis.)
+        """
+        sauvegarde = action.get("sauvegarde")
+        if not sauvegarde:
+            return None
+        return os.path.join(self.chemin_dossier_temporaire(), os.path.basename(sauvegarde))
+
+    # ------------------------------------------------------------------
+    # Ce qui peut encore etre annule
+    # ------------------------------------------------------------------
+
+    @property
+    def historique(self):
+        """Actions encore annulables, de la plus ancienne a la plus recente.
+
+        Chaque action est un dictionnaire :
+        - "action"     : "deplacement", "retouche" ou "rognage" ;
+        - "fichier"    : nom de la photo ;
+        - "depuis", "dossier" : dossiers de depart et d'arrivee d'un
+          deplacement (None designe le dossier source) ;
+        - "emplacement": dossier ou se trouvait la photo retouchee ou rognee ;
+        - "sauvegarde" : nom de la copie intacte gardee avant modification ;
+        - "sans_barre" : vrai si l'action a cree la version sans bandeaux.
+
+        L'historique est commun au tri et a la revue, et garde d'une session a
+        l'autre (decision de l'utilisateur, 16 novembre 2026) : on peut revenir
+        sur n'importe quelle photo et annuler ce qu'on lui a fait, jusqu'a ce
+        que la session soit declaree terminee (fin_de_session.py).
+        """
+        return self.donnees.setdefault("historique", [])
+
+    def actions_de_la_photo(self, nom_fichier):
+        """Actions encore annulables de cette photo, de la plus ancienne a la plus recente."""
+        return [action for action in self.historique if action.get("fichier") == nom_fichier]
+
     def dossier_tri_pour_touche(self, touche):
         """Renvoie le nom du dossier associe a une touche, ou None.
 
@@ -284,11 +351,10 @@ class Suivi:
                 self.rangements[photo] = nouveau_nom
         if self.revue["dossier"] == ancien_nom:
             self.revue["dossier"] = nouveau_nom
-        for etat in (self.tri, self.revue):
-            for action in etat["historique"]:
-                for cle in ("dossier", "depuis", "emplacement"):
-                    if action.get(cle) == ancien_nom:
-                        action[cle] = nouveau_nom
+        for action in self.historique:
+            for cle in ("dossier", "depuis", "emplacement"):
+                if action.get(cle) == ancien_nom:
+                    action[cle] = nouveau_nom
 
     def changer_touche(self, nom_dossier, touche):
         for dossier in self.dossiers_tri:
@@ -303,10 +369,10 @@ class Suivi:
             del self.rangements[photo]
         if self.revue["dossier"] == nom:
             self.donnees["revue"] = Suivi._revue_vide()
-        for etat in (self.tri, self.revue):
-            etat["historique"] = [action for action in etat["historique"]
-                                  if nom not in (action.get("dossier"), action.get("depuis"),
-                                                 action.get("emplacement"))]
+        self.donnees["historique"] = [
+            action for action in self.historique
+            if nom not in (action.get("dossier"), action.get("depuis"),
+                           action.get("emplacement"))]
 
     def ordonner_dossiers_tri(self, dossiers):
         """Remplace la liste par `dossiers` ({"nom", "touche"}), dans cet ordre."""

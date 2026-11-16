@@ -33,15 +33,13 @@ def preparer_tri(suivi):
     photo qui reste a ranger. Pendant la session, les photos rangees restent
     dans la liste, pour qu'on puisse y revenir avec la fleche gauche.
 
-    L'historique repart de zero : ses positions renvoyaient a l'ancienne
-    liste, et le Retour arriere aurait fait reapparaitre une photo rangee lors
-    d'une session precedente. Un rangement d'une session precedente se
-    corrige en mode revue.
+    L'historique d'annulation, lui, est garde (suivi.historique) : une photo
+    rangee lors d'une session precedente se retrouve en mode revue, ou Retour
+    arriere annule ce qu'on lui a fait.
     """
     tri = suivi.tri
     tri["photos"] = photos_a_trier(suivi)
     tri["position"] = 0
-    tri["historique"] = []
     tri["terminee"] = not tri["photos"]
     suivi.enregistrer()
 
@@ -52,7 +50,7 @@ def lancer_tri(racine, suivi):
     Arrive au bout des photos, l'utilisateur peut demander a repasser celles
     qui restent dans le dossier source (touche Entree sur l'ecran de fin) : la
     fenetre se ferme alors, et une nouvelle s'ouvre sur ces seules photos,
-    avec une liste et un historique remis a neuf.
+    avec une liste remise a neuf.
     """
     while True:
         preparer_tri(suivi)

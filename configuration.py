@@ -4,7 +4,8 @@ Ecran de configuration d'un nouvel evenement (section 6).
 L'utilisateur y choisit le dossier de ses photos, donne un nom a l'evenement,
 et definit ses dossiers de tri avec la touche associee a chacun : autant qu'il
 le souhaite, de 1 a 12 (dossiers_tri.py). La liste proposee est celle de la
-derniere fois (preferences.py).
+derniere fois (preferences.py). Il choisit aussi le nom que recevront ses
+photos, ou de ne pas les renommer (renommage.py) ; ce choix est retenu de meme.
 
 Le dossier des photos devient le dossier de l'evenement : il sera renomme du
 nom de l'evenement, et les dossiers de tri seront crees directement dedans
@@ -21,7 +22,9 @@ from tkinter import ttk
 
 import dossiers_tri
 import preferences
+import renommage
 import theme
+from choix_renommage import ChoixDuRenommage
 from dossiers import choisir_dossier, probleme_du_nom
 from editeur_dossiers import EditeurDossiers
 from suivi import Suivi
@@ -48,6 +51,7 @@ class EcranConfiguration:
         self._construire()
         self.variable_dossier.trace_add("write", lambda *_: self._annoncer())
         self.variable_nom.trace_add("write", lambda *_: self._annoncer())
+        self.variable_nom.trace_add("write", lambda *_: self._nom_change())
         self.fenetre.protocol("WM_DELETE_WINDOW", self._annuler)
         self.fenetre.bind("<Escape>", lambda evenement: self._annuler())
         theme.centrer(self.fenetre, parent or racine)
@@ -96,15 +100,23 @@ class EcranConfiguration:
                   style="Doux.TLabel").grid(row=6, column=0, columnspan=3, sticky="w",
                                             pady=(8, 0))
 
+        # -- le nom des photos --
+        ttk.Label(cadre, text="Nom donne aux photos (toujours de la plus ancienne a la "
+                              "plus recente) :").grid(
+            row=7, column=0, columnspan=3, sticky="w", pady=(16, 6))
+        self.choix_renommage = ChoixDuRenommage(
+            cadre, preferences.format_de_renommage() or renommage.FORMAT_PAR_DEFAUT)
+        self.choix_renommage.cadre.grid(row=8, column=0, columnspan=3, sticky="w")
+
         # -- message d'erreur --
         self.etiquette_erreur = ttk.Label(cadre, text="", style="Alerte.TLabel",
                                           wraplength=560, justify="left")
-        self.etiquette_erreur.grid(row=7, column=0, columnspan=3, sticky="w",
+        self.etiquette_erreur.grid(row=9, column=0, columnspan=3, sticky="w",
                                    pady=(14, 0))
 
         # -- boutons --
         boutons = ttk.Frame(cadre)
-        boutons.grid(row=8, column=0, columnspan=3, sticky="e", pady=(18, 0))
+        boutons.grid(row=10, column=0, columnspan=3, sticky="e", pady=(18, 0))
         ttk.Button(boutons, text="Annuler", width=14,
                    command=self._annuler).grid(row=0, column=0, padx=(0, 8))
         ttk.Button(boutons, text="Continuer", width=14, style="Accent.TButton",
@@ -120,6 +132,10 @@ class EcranConfiguration:
         # le dossier n'a pas a etre renomme.
         if not self.variable_nom.get().strip():
             self.variable_nom.set(os.path.basename(dossier))
+
+    def _nom_change(self):
+        """L'exemple du format « nom de l'evenement et numero » suit le nom saisi."""
+        self.choix_renommage.changer_nom_evenement(self.variable_nom.get().strip())
 
     def _annoncer(self):
         """Dit ce qui va arriver au dossier : renomme ou non, et s'il est synchronise."""
@@ -191,6 +207,7 @@ class EcranConfiguration:
             "nom_evenement": self.variable_nom.get().strip(),
             "dossiers_tri": [{"nom": dossier["nom"], "touche": dossier["touche"]}
                              for dossier in self.editeur.dossiers()],
+            "renommage": self.choix_renommage.nom_format(),
         }
         self.fenetre.destroy()
 

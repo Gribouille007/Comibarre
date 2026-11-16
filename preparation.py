@@ -5,7 +5,7 @@ Cette phase s'execute une seule fois, juste apres la configuration, sans aucune
 action de l'utilisateur :
 
 1. creation des dossiers de rangement ;
-2. renommage de toutes les photos en 1, 2, 3... ;
+2. renommage de toutes les photos, selon le format choisi (renommage.py) ;
 3. mise a l'ecart des fichiers RAW et video.
 
 Elle n'est jamais rejouee lors de la reprise d'un evenement (sections 5 et 10).
@@ -13,11 +13,11 @@ Elle n'est jamais rejouee lors de la reprise d'un evenement (sections 5 et 10).
 
 import errno
 import os
-import time
 from datetime import datetime
 
 from PIL import ExifTags, Image
 
+import renommage
 from fichiers import deplacer_fichier
 # Importer `images` enregistre aussi le format HEIC aupres de Pillow, ce qui
 # permet de lire la date de prise de vue des photos d'iPhone.
@@ -37,10 +37,6 @@ EXTENSIONS_VIDEO = {
 
 NOM_DOSSIER_RAW = "RAW"
 NOM_DOSSIER_VIDEOS = "Videos"
-
-# Prefixe des noms temporaires utilises pendant le renommage.
-PREFIXE_TEMPORAIRE = "_renommage_temporaire_"
-
 
 def date_de_prise_de_vue_exif(chemin):
     """Date et heure de prise de vue inscrites dans la photo, ou None.
@@ -224,69 +220,78 @@ def _signaler(avancement, texte):
         avancement(texte)
 
 
-def renommer_photos(dossier_source, noms, avancement=None):
-    """Renomme tous les fichiers en 1, 2, 3... du plus ancien au plus recent (section 7.2).
+def renommer_photos(dossier_source, noms, avancement=None,
+                    nom_format=renommage.FORMAT_NUMERO, nom_evenement=""):
+    """Renomme les fichiers selon le format choisi, du plus ancien au plus recent (section 7.2).
 
-    Le numero 1 revient a la photo prise la premiere, le dernier numero a la
-    photo prise la derniere, d'apres la date et l'heure de prise de vue.
+    Les formats sont decrits dans renommage.py : par date (le defaut), par
+    numero, au nom de l'evenement, ou aucun renommage. Dans tous, l'ordre est
+    celui de la date et de l'heure de prise de vue : le premier nom revient a
+    la photo prise la premiere.
 
-    Le renommage se fait en deux passes. Sans cela, renommer un fichier en
-    « 3.jpg » alors qu'un autre fichier porte deja ce nom ecraserait ce dernier.
-    La premiere passe donne a chacun un nom temporaire, forcement libre ; la
-    seconde attribue les noms definitifs, en toute securite.
+    Dans les formats par date, les fichiers d'une meme prise de vue (une photo
+    et son RAW, une photo et sa video) recoivent le meme nom : c'est la date de
+    la photo qui compte, celle du RAW ou de la video n'etant souvent que la
+    date du fichier.
 
-    Les noms temporaires portent la date et l'heure du renommage : si une
-    preparation precedente avait ete interrompue en laissant des noms
-    temporaires, ceux de la nouvelle ne peuvent pas les rencontrer. Chaque
-    renommage reessaie un instant si un fichier est occupe (OneDrive qui
-    l'envoie en ligne, l'explorateur qui fabrique sa vignette...), et aucun
-    n'ecrase jamais un fichier existant (voir fichiers.deplacer_fichier).
+    Le renommage se fait en deux passes, sans jamais ecraser un fichier (voir
+    renommage.renommer_en_deux_passes).
 
-    Renvoie la liste ordonnee des nouveaux noms.
+    Renvoie la liste des nouveaux noms, dans l'ordre chronologique.
     """
-    chemins = [os.path.join(dossier_source, nom) for nom in noms]
-    total = len(chemins)
+    if nom_format == renommage.FORMAT_AUCUN:
+        return list(noms)
+    total = len(noms)
 
-    # La date de chaque photo est lue une seule fois, avant le classement :
+    # La date de chaque fichier est lue une seule fois, avant le classement :
     # c'est l'etape la plus longue, chaque photo devant etre ouverte (et, dans
     # un dossier OneDrive, parfois d'abord telechargee). On peut ainsi en
     # annoncer l'avancement.
-    cles = {}
-    for numero, chemin in enumerate(chemins, start=1):
-        cles[chemin] = ordre_chronologique(chemin)
+    dates = {}
+    for numero, nom in enumerate(noms, start=1):
+        dates[nom] = ordre_chronologique(os.path.join(dossier_source, nom))[0]
         _signaler(avancement, "Lecture des dates de prise de vue : %d sur %d" % (numero, total))
-    chemins.sort(key=lambda chemin: cles[chemin])
-    prefixe = "%s%s_" % (PREFIXE_TEMPORAIRE, time.strftime("%Y%m%d%H%M%S"))
 
-    # Un sous-dossier qui porterait l'un des noms definitifs (un dossier
-    # « 2.jpg ») arreterait la seconde passe a mi-chemin, et de nouveau a
-    # chaque reprise. On le signale avant d'avoir renomme quoi que ce soit.
-    for numero, chemin in enumerate(chemins, start=1):
-        nom_final = "%d%s" % (numero, os.path.splitext(chemin)[1])
-        if os.path.isdir(os.path.join(dossier_source, nom_final)):
+    # Les fichiers sont regroupes par prise de vue (voir renommage.identite).
+    # La photo represente son groupe : c'est sa date et son contenu qui donnent le nom.
+    groupes = {}
+    for nom in noms:
+        groupes.setdefault(renommage.identite(nom, nom_format), []).append(nom)
+    prises = []
+    for identite, membres in groupes.items():
+        images = [nom for nom in membres if est_une_image(nom)]
+        representant = sorted(images or membres, key=str.lower)[0]
+        prises.append({"identite": identite, "date": dates[representant],
+                       "nom": representant,
+                       "chemin": os.path.join(dossier_source, representant)})
+    _signaler(avancement, "Calcul des nouveaux noms...")
+    bases = renommage.calculer_les_noms(prises, nom_format, nom_evenement)
+
+    nouveaux = {nom: bases[renommage.identite(nom, nom_format)] + os.path.splitext(nom)[1]
+                for nom in noms}
+
+    # Un sous-dossier, ou un fichier que le logiciel ne renomme pas, qui
+    # porterait l'un des noms definitifs arreterait la seconde passe a
+    # mi-chemin. On le signale avant d'avoir renomme quoi que ce soit.
+    anciens = {nom.lower() for nom in noms}
+    for nom_final in nouveaux.values():
+        if (nom_final.lower() not in anciens
+                and os.path.exists(os.path.join(dossier_source, nom_final))):
+            genre = ("Un sous-dossier" if os.path.isdir(os.path.join(dossier_source, nom_final))
+                     else "Un fichier")
             raise FileExistsError(
-                errno.EEXIST, "Un sous-dossier porte le nom « %s », que doit recevoir "
-                "une photo : renommez ce sous-dossier, puis recommencez" % nom_final)
+                errno.EEXIST, "%s porte le nom « %s », que doit recevoir une photo : "
+                "renommez-le, puis recommencez" % (genre, nom_final))
 
-    # Premiere passe : noms temporaires.
-    chemins_temporaires = []
-    for numero, chemin in enumerate(chemins, start=1):
-        extension = os.path.splitext(chemin)[1]
-        temporaire = os.path.join(dossier_source, "%s%d%s" % (prefixe, numero, extension))
-        deplacer_fichier(chemin, temporaire)
-        chemins_temporaires.append(temporaire)
-        _signaler(avancement, "Renommage : %d sur %d" % (numero, 2 * total))
+    renommage.renommer_en_deux_passes(
+        [(os.path.join(dossier_source, nom), os.path.join(dossier_source, nouveaux[nom]))
+         for nom in noms if nouveaux[nom] != nom],
+        avancement)
 
-    # Seconde passe : noms definitifs, sans zeros devant les nombres.
-    nouveaux_noms = []
-    for numero, temporaire in enumerate(chemins_temporaires, start=1):
-        extension = os.path.splitext(temporaire)[1]
-        nom_final = "%d%s" % (numero, extension)
-        deplacer_fichier(temporaire, os.path.join(dossier_source, nom_final))
-        nouveaux_noms.append(nom_final)
-        _signaler(avancement, "Renommage : %d sur %d" % (total + numero, 2 * total))
-
-    return nouveaux_noms
+    ordre = sorted(noms, key=lambda nom: (
+        dates[sorted(groupes[renommage.identite(nom, nom_format)], key=str.lower)[0]],
+        nom.lower()))
+    return [nouveaux[nom] for nom in ordre]
 
 
 def mettre_a_ecart(suivi, noms):
@@ -328,15 +333,11 @@ def mettre_a_ecart(suivi, noms):
 
 
 def ordonner_photos(noms):
-    """Trie les photos par leur numero, et non par ordre alphabetique.
+    """Classe les photos dans l'ordre de leurs noms, nombres compares comme des nombres.
 
     Sans cela, « 10.jpg » passerait avant « 2.jpg ».
     """
-    def numero(nom):
-        base = os.path.splitext(nom)[0]
-        return int(base) if base.isdigit() else 0
-
-    return sorted(noms, key=numero)
+    return sorted(noms, key=renommage.cle_de_classement)
 
 
 def preparer(suivi, avancement=None):
@@ -345,7 +346,7 @@ def preparer(suivi, avancement=None):
     `avancement`, facultatif, est appele de temps en temps avec un court texte
     disant ou en est la preparation (« Renommage : 120 sur 600 »). Cette
     fonction ne touche jamais a l'interface : elle peut tourner sur un fil
-    d'arriere-plan (voir main.EcranDemarrage._preparer_avec_attente).
+    d'arriere-plan (voir attente.py).
 
     Renvoie un petit compte rendu, affiche ensuite a l'utilisateur.
     """
@@ -361,14 +362,14 @@ def preparer(suivi, avancement=None):
     avec_video = bool(extensions & EXTENSIONS_VIDEO)
 
     creer_dossiers(suivi, avec_raw, avec_video)
-    nouveaux_noms = renommer_photos(dossier_source, noms, avancement)
+    nouveaux_noms = renommer_photos(dossier_source, noms, avancement,
+                                    suivi.renommage, suivi.nom_evenement)
     _signaler(avancement, "Mise de cote des fichiers RAW et des videos...")
     restants, laisses = mettre_a_ecart(suivi, nouveaux_noms)
     photos = ordonner_photos(restants)
 
     suivi.tri["photos"] = photos
     suivi.tri["position"] = 0
-    suivi.tri["historique"] = []
     suivi.tri["terminee"] = False
     suivi.donnees["preparation_faite"] = True
     suivi.enregistrer()

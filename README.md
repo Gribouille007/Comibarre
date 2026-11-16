@@ -28,7 +28,9 @@ environnement isolé (le dossier `venv/`), télécharge les trois bibliothèques
 nécessaires, puis ouvre la fenêtre du logiciel. Comptez une minute.
 
 Aux lancements suivants, la fenêtre s'ouvre directement : rien n'est
-réinstallé.
+réinstallé, et le lanceur passe la main sans attendre au Python du logiciel.
+L'écran d'accueil s'affiche d'abord ; le reste (lecture des photos, détection
+des visages) se charge pendant que vous choisissez votre événement.
 
 > **Si Python manque**, le script vous le dit et propose de l'installer :
 > par Homebrew sous macOS, par `winget` sous Windows, par le gestionnaire de
@@ -168,7 +170,8 @@ Vous renseignez :
 1. le **dossier des photos** ;
 2. le **nom de l'événement** (par exemple « Mariage Julie et Marc ») — le nom
    du dossier est proposé d'office ;
-3. vos **dossiers de tri**, chacun avec un nom et une touche du clavier.
+3. vos **dossiers de tri**, chacun avec un nom et une touche du clavier ;
+4. le **nom donné aux photos** (voir ci-dessous).
 
 **Votre dossier de photos devient le dossier de l'événement** : il est renommé
 du nom de l'événement, et les dossiers de tri sont créés directement dedans. Il
@@ -193,13 +196,37 @@ s'en sert lui-même.
 > Si le dossier est synchronisé par **OneDrive** (ou Google Drive, Dropbox,
 > iCloud), l'écran vous le signale : voir la section 9 bis.
 
+#### Le nom donné aux photos
+
+Cinq formats au choix ; un exemple s'affiche sous la liste, et votre choix est
+retenu pour la prochaine fois. Dans tous, l'ordre est celui des prises de
+vue : **classer les fichiers par nom les donne de la plus ancienne à la plus
+récente.**
+
+| Format | Exemple | À savoir |
+|---|---|---|
+| **Date, heure et code** (par défaut) | `2026-08-24_14-03-27_K7F2.jpg` | Le code de 4 caractères vient du contenu de la photo. **Deux tris faits sur deux ordinateurs se réunissent sans qu'aucun nom se répète**, même pour des photos prises dans la même seconde ; et une même photo reçoit partout le même nom, ce qui fait reconnaître les vrais doublons |
+| **Date et heure** | `2026-08-24_14-03-27.jpg` | Plus court, mais deux appareils qui déclenchent dans la même seconde donnent le même nom |
+| **Numéros** | `1.jpg`, `2.jpg`, `3.jpg` | Le format d'origine, sans zéros devant. Deux tris faits séparément ont les mêmes noms |
+| **Nom de l'événement et numéro** | `Mariage_0001.jpg` | Numéros complétés par des zéros |
+| **Ne pas renommer** | `IMG_4012.jpg` | Les fichiers gardent le nom donné par l'appareil |
+
+Dans les deux formats par date, les photos d'une même seconde (rafale) sont
+numérotées dans leur ordre (`…_14-03-27-1_…`, `…_14-03-27-2_…`), et les
+fichiers d'une même prise de vue portent le même nom : `IMG_12.JPG` et
+`IMG_12.CR2` deviennent `2026-…_K7F2.JPG` et `2026-…_K7F2.CR2`. L'heure est
+celle de l'ordinateur pour l'instant de la prise de vue.
+
+Le format se change aussi après coup : bouton **« Renommer les photos »** du
+menu (étape C).
+
 ### Étape B — Préparation automatique
 
 Elle s'exécute une seule fois, sans rien vous demander :
 
 ```
 Mariage Julie et Marc/        (votre dossier de photos, renommé)
-├── 1.jpg, 2.jpg, 3.jpg…      (les photos à trier, renommées)
+├── 2026-08-24_14-03-27_K7F2.jpg…   (les photos à trier, renommées)
 ├── A garder/                 (vos dossiers de tri : ici, ceux proposés
 ├── Ratees/                    d'office, que vous pouvez renommer à votre
 ├── A revoir/                  goût, accents compris)
@@ -209,10 +236,11 @@ Mariage Julie et Marc/        (votre dossier de photos, renommé)
 └── suivi.json    (votre avancement)
 ```
 
-- Les photos sont **renommées `1`, `2`, `3`…**, sans zéros devant, extension
-  d'origine conservée, dans l'ordre **chronologique de prise de vue** : `1` est
-  la photo la plus ancienne (date et heure), le dernier numéro la plus récente.
-  La date est lue dans la photo elle-même (EXIF) : la date de prise de vue, ou
+- Les photos sont **renommées selon le format choisi** à l'étape A (ou pas du
+  tout, si vous avez choisi « Ne pas renommer »), extension d'origine
+  conservée, dans l'ordre **chronologique de prise de vue** : le premier nom
+  revient à la photo la plus ancienne (date et heure), le dernier à la plus
+  récente. La date est lue dans la photo elle-même (EXIF) : la date de prise de vue, ou
   à défaut celle inscrite par l'appareil, avec son fuseau horaire quand
   l'appareil l'indique (photos prises à l'étranger, nuit du changement
   d'heure). Sans date lisible, on prend la plus ancienne des dates du fichier.
@@ -223,22 +251,24 @@ Mariage Julie et Marc/        (votre dossier de photos, renommé)
   reste à la racine et le compte rendu le signale : rien n'est jamais écrasé.
 - Les autres fichiers (textes, PDF…) ne sont ni renommés ni déplacés, pas plus
   que les fichiers `._…` que macOS ajoute sur les clés et les cartes mémoire.
-- Un **sous-dossier** qui porterait le nom que doit recevoir une photo (un
-  dossier nommé `2.jpg`) est signalé avant tout renommage : renommez-le, puis
-  recommencez.
+- Un **sous-dossier** ou un autre fichier qui porterait le nom que doit
+  recevoir une photo (un dossier nommé `2.jpg`) est signalé avant tout
+  renommage : renommez-le, puis recommencez. Un renommage qui échoue en route
+  rend leur ancien nom à tous les fichiers.
 - Si la préparation est interrompue (fichier bloqué, coupure de courant), la
   reprise de l'événement propose de la terminer.
 
-> À noter : la numérotation porte sur **tous** les fichiers de la racine. Comme
+> À noter, au format « Numéros » : la numérotation porte sur **tous** les fichiers de la racine. Comme
 > les RAW et les vidéos reçoivent eux aussi un numéro avant d'être déplacés, la
 > suite des numéros des photos peut comporter des trous (1, 2, 3, 6, 8…). C'est
 > normal.
 
 ### Étape C — Menu principal
 
-Cinq choix : **trier** les photos du dossier source, **revoir un dossier**
+Sept choix : **trier** les photos du dossier source, **revoir un dossier**
 (reclasser, barrer des yeux), **gérer les dossiers de tri** (section 5 bis),
-**dupliquer un dossier**, ou quitter. Le menu rappelle votre avancement et le
+**dupliquer un dossier**, **renommer les photos**, **terminer la session**, ou
+quitter. Le menu rappelle votre avancement et le
 nombre de photos dans chaque dossier, copies comprises. Il signale aussi, en
 rouge, les photos rangées qui seraient revenues dans le dossier source, et un
 dossier synchronisé par OneDrive (section 9 bis).
@@ -247,6 +277,27 @@ Le tri, la revue et la censure des yeux se font **dans la même fenêtre** : la
 censure n'est plus une étape à part, c'est le **mode barrer**, que la touche
 **Tab** active ou désactive (section 6).
 
+**Renommer les photos** applique un autre format de nom à **toutes** les photos
+de l'événement, où qu'elles soient : à trier, rangées, copiées, mises de côté
+(`RAW`, `Videos`) ou gardées sans barre. Une photo, sa version sans barre et
+ses copies reçoivent le même nouveau nom. C'est ce qui permet de réunir deux
+tris déjà faits au format « Numéros » : renommez-les d'abord « Date, heure et
+code ». Les annulations en attente restent possibles après le renommage.
+
+**Terminer la session** rend le tri **définitif**. Jusque-là, rien ne l'est :
+vous pouvez quitter, revenir, et défaire ce que vous avez fait à n'importe
+quelle photo (voir « Annuler », section 4). Le bouton, après confirmation :
+
+- efface les copies intactes gardées pour l'annulation (le menu indique la
+  place qu'elles occupent) : plus rien ne peut être annulé ;
+- **supprime les dossiers vides** (dossiers de tri, `RAW`, `Videos`). Ils
+  restent dans la liste de l'événement : si vous y rangez une photo plus tard,
+  le dossier est recréé tout seul.
+
+Les photos rangées et les versions sans barre ne sont pas touchées. Vous
+pouvez rouvrir l'événement ensuite : ce que vous y ferez sera de nouveau
+annulable, jusqu'à la prochaine fin de session.
+
 ---
 
 ## 4. Étape 1 — Le tri
@@ -254,6 +305,17 @@ censure n'est plus une étape à part, c'est le **mode barrer**, que la touche
 Les photos défilent une par une en grand, **toujours dans le bon sens** (le
 logiciel lit l'orientation enregistrée par l'appareil). L'avancement est affiché
 en permanence, sous la forme « Photo 12 sur 340 ».
+
+**Statistiques en temps réel**, en bas de la fenêtre :
+
+```
+A trier : 118   |   Rangees : 59 sur 177 (33 %)   |   Cette session : 24   |   Rythme : 9 photos/min   |   Temps restant : environ 13 min   |   31 action(s) annulable(s)
+[1] A garder (41)   [2] Ratees (12)   [3] A revoir (6)      [N] nouveau dossier
+```
+
+Le nombre de photos de chaque dossier suit sa touche. Le rythme et le temps
+restant apparaissent après quelques photos ; une pause n'est comptée que pour
+une minute, pour ne pas les fausser.
 
 ### Commandes du tri
 
@@ -264,7 +326,7 @@ en permanence, sous la forme « Photo 12 sur 340 ».
 | **Entrée** | Enregistrer les retouches en attente dans la photo, sans la déplacer, puis afficher la suivante |
 | **Barre d'espace** ou **flèche droite** | Passer à la photo suivante **sans** la ranger ni enregistrer ses retouches |
 | **Flèche gauche** | Revenir à la photo précédente, sans rien déplacer ni enregistrer |
-| **Retour arrière** | Annuler la dernière action (rangement, retouche ou rognage) : la photo revient à sa place, dans son état d'avant, et se réaffiche. Plusieurs annulations de suite sont possibles |
+| **Retour arrière** | **Annuler** : la photo revient à sa place, dans son état d'avant, et se réaffiche. Sans avoir bougé, c'est la dernière action qui est annulée, et plusieurs appuis remontent les actions une à une. **Revenu sur une ancienne photo avec les flèches, c'est ce qu'on a fait à cette photo-là qui est annulé**, même si d'autres ont été modifiées depuis. Le rappel des touches dit toujours ce qui sera annulé (voir ci-dessous) |
 | **R** | Faire pivoter la photo d'un quart de tour (enregistré par Entrée ou une touche de tri) |
 | **C** | Rogner la photo en réduisant ses bords (voir ci-dessous) |
 | **Tab** | Activer ou désactiver le **mode barrer** les yeux (section 6) |
@@ -365,9 +427,25 @@ Repères utiles :
   en attente, comme avant le rognage, et les bandeaux déjà posés suivent le
   nouveau cadrage.
 - Une copie intacte est gardée avant chaque rognage et chaque retouche :
-  **Retour arrière** la remet en place. Ces copies sont effacées à la fermeture
-  de la fenêtre ; l'annulation n'est donc possible que tant qu'elle est
-  ouverte. Un rangement d'une session précédente se corrige en mode revue.
+  **Retour arrière** la remet en place, même lors d'une session suivante.
+
+### Annuler, même une ancienne photo
+
+Tout ce que vous faites à une photo reste annulable — rangement, bandeaux,
+rotation, rognage — **jusqu'à ce que vous cliquiez sur « Terminer la session »**
+dans le menu. Vous pouvez fermer le logiciel et y revenir entre-temps.
+
+- **Vous venez de faire une erreur** : appuyez sur Retour arrière. La dernière
+  action est annulée ; appuyez encore pour remonter aux précédentes.
+- **Vous voulez défaire ce que vous avez fait à une photo plus ancienne** :
+  revenez dessus avec la flèche gauche (ou ouvrez son dossier en mode revue),
+  puis appuyez sur Retour arrière. Seule cette photo est concernée, les
+  autres gardent leurs modifications. Appuyez de nouveau pour défaire, une à
+  une, les actions plus anciennes de cette même photo.
+
+Le rappel des touches annonce à tout moment ce que fera la touche :
+« [Retour arrière] annuler le rognage de 2026-08-24_14-03-27_K7F2.jpg », ou
+« rien à annuler ».
 
 L'étape est terminée lorsque toutes les photos ont été soit rangées, soit
 passées. Les photos passées restent dans le dossier source, et **l'écran de fin
@@ -404,7 +482,7 @@ suivante s'affiche.
 | **Entrée** | Enregistrer les retouches et passer à la suivante |
 | **Barre d'espace** ou **flèche droite** | Passer à la photo suivante sans la déplacer ni l'enregistrer |
 | **Flèche gauche** | Revenir à la photo précédente, sans rien déplacer |
-| **Retour arrière** | Annuler le dernier déplacement, la dernière retouche ou le dernier rognage |
+| **Retour arrière** | Annuler, comme au tri : la dernière action, ou, revenu sur une photo avec les flèches, ce qui a été fait à cette photo (même lors d'une session précédente, même pendant le tri) |
 | **R**, **C**, **N**, **Tab**, molette, cliquer-glisser | Comme au tri : pivoter, rogner, nouveau dossier, mode barrer, zoomer, déplacer la vue |
 | **Échap** | Enregistrer l'avancement et fermer |
 
@@ -536,10 +614,13 @@ quand vous la pivotez, et s'enregistrent exactement là où vous les voyez.
 ### Filet de sécurité
 
 Avant de modifier une photo, le logiciel en conserve une **copie intacte** dans
-un dossier temporaire. La touche Retour arrière restaure cette copie.
+le dossier `_sauvegardes_temporaires` de l'événement. La touche Retour arrière
+restaure cette copie.
 
-> Ce dossier temporaire est **vidé à la fermeture du logiciel**. L'annulation
-> n'est donc possible que **pendant la session en cours**.
+> Ces copies sont gardées **d'une session à l'autre**, jusqu'à ce que vous
+> cliquiez sur **« Terminer la session »** dans le menu, qui les efface et rend
+> le tri définitif. D'ici là, elles occupent la place des photos modifiées ;
+> le menu indique combien.
 
 ---
 
@@ -596,9 +677,12 @@ première), et la revue d'un dossier à la photo où vous l'aviez laissée. Seul
 exception : une préparation qui avait été interrompue est proposée à la
 reprise, pour être terminée.
 
+Tout ce que vous avez fait reste **annulable** à la reprise, tant que la
+session n'a pas été terminée depuis le menu (étape C).
+
 Le logiciel retient aussi, d'une ouverture à l'autre, vos dossiers de tri, le
-dernier événement ouvert, le dossier où vous allez chercher vos photos et la
-taille de la fenêtre de tri. Ces préférences sont dans le fichier
+format de nom des photos, le dernier événement ouvert, le dossier où vous
+allez chercher vos photos et la taille de la fenêtre de tri. Ces préférences sont dans le fichier
 `preferences.json`, à côté du programme ; le supprimer revient simplement aux
 valeurs par défaut.
 
@@ -658,7 +742,14 @@ déplacer le résultat dans OneDrive.
 
 | Fichier | Responsabilité |
 |---|---|
-| `main.py` | Lancement, gestion des sessions, menu principal |
+| `main.py` | Lancement, écran d'accueil, chargement du reste en arrière-plan |
+| `menu.py` | Menu principal d'un événement |
+| `renommage.py` | Formats de nom des photos, renommage en deux passes |
+| `renommage_evenement.py` | Renommage des photos d'un événement déjà commencé |
+| `choix_renommage.py` | Liste des formats de nom, avec exemple |
+| `fin_de_session.py` | Fin de la session : tri définitif, dossiers vides supprimés |
+| `attente.py` | Fenêtre d'attente des travaux longs (préparation, renommage) |
+| `statistiques.py` | Statistiques de la fenêtre de tri : compteurs, rythme, temps restant |
 | `configuration.py` | Écran de configuration d'un nouvel événement |
 | `dossiers_tri.py` | Dossiers de tri : valeurs par défaut, règles des noms et des touches |
 | `editeur_dossiers.py` | Saisie des dossiers de tri (lignes nom + touche), boîte de la touche N |
@@ -691,7 +782,7 @@ déplacer le résultat dans OneDrive.
 | `verifier_installation.py` | Contrôle que l'installation est fonctionnelle |
 | `tester_bandeau.py` | Vérifie que le bandeau couvre les yeux, et rien de plus |
 | `tester_rognage.py` | Vérifie la géométrie du cadre de rognage, rotations comprises |
-| `tester_rangement.py` | Vérifie la préparation, le tri, l'annulation, les fichiers bloqués, les bandeaux à la souris |
+| `tester_rangement.py` | Vérifie la préparation, les formats de nom, le tri, l'annulation photo par photo, les statistiques, la fin de session, les fichiers bloqués, les bandeaux à la souris |
 | `tester_formats.py` | Vérifie le réenregistrement de chaque format d'image |
 
 Les règles de conception du projet sont consignées dans `CLAUDE.md`.
@@ -715,8 +806,22 @@ Espace et les flèches l'abandonnent, pour qu'une rotation faite seulement pour
 mieux voir ne modifie pas la photo.
 
 **J'ai validé une photo par erreur.**
-Appuyez sur Retour arrière : la photo d'origine est restaurée. Attention, cela
-n'est possible que tant que le logiciel n'a pas été fermé.
+Appuyez sur Retour arrière : la photo d'origine est restaurée. Si vous êtes
+déjà passé à autre chose, revenez sur la photo avec la flèche gauche (ou en
+mode revue), puis appuyez sur Retour arrière. C'est possible même après avoir
+fermé le logiciel, tant que vous n'avez pas cliqué sur « Terminer la session ».
+
+**Je veux réunir les photos triées sur deux ordinateurs.**
+Au format « Date, heure et code » (le format par défaut), aucun nom ne se
+répète : copiez simplement les dossiers de l'un dans ceux de l'autre. Pour des
+événements déjà triés au format « Numéros », cliquez d'abord sur « Renommer les
+photos » dans le menu de chacun, et choisissez « Date, heure et code ».
+
+**Le logiciel met longtemps à s'ouvrir.**
+Passez par `lancer.bat`, `lancer.command` ou `lancer.sh` : une fois
+l'installation faite, ils ouvrent directement le logiciel. Le tout premier
+lancement après un redémarrage de l'ordinateur reste un peu plus long, le
+temps que le système relise les bibliothèques sur le disque.
 
 **Windows refuse de déplacer mon dossier : « un fichier ou dossier est ouvert ».**
 Cela veut dire que le logiciel tourne encore. Tant qu'il lit des photos en

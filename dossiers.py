@@ -20,6 +20,7 @@ from tkinter import filedialog, ttk
 import theme
 from images import est_une_image
 from polices import police
+from renommage import cle_de_classement
 
 # Caracteres interdits dans un nom de dossier sous Windows. Ils sont refuses
 # sur les trois systemes, pour qu'un evenement reste lisible partout.
@@ -88,9 +89,11 @@ def choisir_dossier(titre, parent, dossier_initial=None):
 
 
 def photos_du_dossier(chemin_dossier):
-    """Liste les images d'un dossier de tri, ordonnees par leur numero.
+    """Liste les images d'un dossier, dans l'ordre de leurs noms.
 
-    Sans ce tri par numero, « 10.jpg » passerait avant « 2.jpg ».
+    Les nombres sont compares comme des nombres : sans cela, « 10.jpg »
+    passerait avant « 2.jpg ». Les noms par date se classent d'eux-memes de la
+    photo la plus ancienne a la plus recente (voir renommage.py).
 
     `os.scandir` sait deja, pour chaque entree, s'il s'agit d'un fichier :
     `os.path.isfile` interrogeait le disque une fois par photo, soit 0,18 s
@@ -101,12 +104,7 @@ def photos_du_dossier(chemin_dossier):
     with os.scandir(chemin_dossier) as entrees:
         noms = [entree.name for entree in entrees
                 if entree.is_file() and est_une_image(entree.name)]
-
-    def numero(nom):
-        base = os.path.splitext(nom)[0]
-        return (0, int(base)) if base.isdigit() else (1, 0)
-
-    return sorted(noms, key=lambda nom: (numero(nom), nom))
+    return sorted(noms, key=cle_de_classement)
 
 
 def contient_des_fichiers(chemin_dossier):

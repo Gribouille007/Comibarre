@@ -12,12 +12,22 @@ ouvre directement la fenetre.
 Il n'utilise que ce qui est fourni d'origine avec Python : il peut donc
 s'executer avant toute installation.
 
+Lancement rapide (demande de l'utilisateur, 16 novembre 2026). Une fois
+l'installation faite, les fichiers `lancer.*` appellent ce fichier directement
+avec le Python de l'environnement isole, et le logiciel s'ouvre dans ce meme
+Python (voir lancer_ici). Auparavant, chaque lancement demarrait Python quatre
+fois : une pour verifier sa version, une pour ce fichier, une pour verifier que
+les bibliotheques se chargeaient (OpenCV compris, plusieurs secondes), et une
+derniere pour le logiciel, qui les chargeait de nouveau. Les bibliotheques ne
+sont plus essayees qu'apres un echec.
+
 Options :
     --verifier      installe si besoin, puis lance les verifications au lieu du logiciel
     --reinstaller   efface l'environnement et le refabrique entierement
 """
 
 import hashlib
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -34,6 +44,14 @@ REQUIREMENTS = os.path.join(DOSSIER, "requirements.txt")
 # refaire : le lancement est alors immediat.
 TEMOIN = os.path.join(DOSSIER_VENV, "bibliotheques_installees.txt")
 
+# Code de sortie qui signale que l'environnement isole est a reparer : les
+# fichiers `lancer.*` passent alors par le chemin complet (voir main).
+CODE_A_REPARER = 3
+
+# Les bibliotheques dont le logiciel a besoin, sous le nom par lequel Python
+# les charge.
+BIBLIOTHEQUES = ("tkinter", "PIL", "cv2", "pillow_heif")
+
 
 def python_du_venv():
     """Chemin de l'interpreteur Python a l'interieur de l'environnement isole."""
@@ -47,13 +65,42 @@ def empreinte_des_bibliotheques():
         return hashlib.sha256(fichier.read()).hexdigest()
 
 
-def deja_installe():
+def temoin_a_jour():
+    """Les bibliotheques de requirements.txt ont-elles deja ete installees ?
+
+    Verification immediate : on compare une empreinte, sans rien charger.
+    """
     if not os.path.isfile(python_du_venv()) or not os.path.isfile(TEMOIN):
         return False
-    with open(TEMOIN, encoding="utf-8") as fichier:
-        if fichier.read().strip() != empreinte_des_bibliotheques():
-            return False
-    return environnement_fonctionne()
+    try:
+        with open(TEMOIN, encoding="utf-8") as fichier:
+            return fichier.read().strip() == empreinte_des_bibliotheques()
+    except OSError:
+        return False
+
+
+def dans_l_environnement():
+    """Ce fichier est-il execute par le Python de l'environnement isole ?"""
+    return os.path.normcase(os.path.abspath(sys.prefix)) == os.path.normcase(DOSSIER_VENV)
+
+
+def lancer_ici():
+    """Ouvre le logiciel dans ce Python-ci, celui de l'environnement isole.
+
+    Les bibliotheques sont cherchees sans etre chargees (`find_spec`) : c'est
+    immediat, et cela suffit a reperer un environnement incomplet. Le logiciel
+    les chargera lui-meme, en arriere-plan, une fois sa fenetre affichee.
+    """
+    try:
+        manquantes = [nom for nom in BIBLIOTHEQUES if importlib.util.find_spec(nom) is None]
+    except (ImportError, ValueError):
+        manquantes = list(BIBLIOTHEQUES)
+    if manquantes:
+        return CODE_A_REPARER
+    sys.path.insert(0, DOSSIER)
+    import main as logiciel
+    logiciel.main()
+    return 0
 
 
 def environnement_fonctionne():
@@ -62,12 +109,13 @@ def environnement_fonctionne():
     Ses fichiers peuvent etre la sans qu'il fonctionne : il s'appuie sur le
     Python qui l'a cree, et une mise a jour ou une desinstallation de ce
     Python le casse. Chaque lancement s'arretait alors sur « did not find
-    executable », sans rien proposer. On l'essaie donc pour de bon ; s'il ne
-    repond pas, il est refait (voir main).
+    executable », sans rien proposer. On l'essaie donc pour de bon, mais
+    seulement apres un lancement rate : cet essai charge toutes les
+    bibliotheques, et prenait plusieurs secondes a chaque lancement.
     """
     try:
         resultat = subprocess.run(
-            [python_du_venv(), "-c", "import tkinter, PIL, cv2, pillow_heif"],
+            [python_du_venv(), "-c", "import " + ", ".join(BIBLIOTHEQUES)],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
         return False
@@ -168,10 +216,26 @@ def noms_sans_version():
 
 
 def lancer(script):
-    """Lance un script du projet avec le Python de l'environnement isole."""
-    resultat = subprocess.run([python_du_venv(), os.path.join(DOSSIER, script)],
-                              cwd=DOSSIER)
+    """Lance un script du projet avec le Python de l'environnement isole.
+
+    Renvoie son code de sortie, ou CODE_A_REPARER si ce Python ne demarre pas.
+    """
+    try:
+        resultat = subprocess.run([python_du_venv(), os.path.join(DOSSIER, script)],
+                                  cwd=DOSSIER)
+    except OSError:
+        return CODE_A_REPARER
     return resultat.returncode
+
+
+def installer():
+    """Cree ou repare l'environnement isole, puis y installe les bibliotheques."""
+    # Un environnement casse (son Python a ete mis a jour ou desinstalle)
+    # est refait entierement : y reinstaller les bibliotheques echouerait.
+    if not os.path.isfile(python_du_venv()) or not python_du_venv_demarre():
+        fabriquer_l_environnement()
+    installer_les_bibliotheques()
+    print("Installation terminee.\n")
 
 
 def arreter(message):
@@ -199,23 +263,35 @@ def attendre_avant_de_fermer():
 
 def main():
     verifier_la_version_de_python()
+
+    # Chemin rapide : appele par le Python de l'environnement isole, deja
+    # installe, ce fichier ouvre directement le logiciel. Dans tous les autres
+    # cas (option demandee, bibliotheques changees ou manquantes), il rend la
+    # main, et les fichiers `lancer.*` le rappellent avec le Python du systeme.
+    if dans_l_environnement():
+        if len(sys.argv) > 1 or not temoin_a_jour():
+            return CODE_A_REPARER
+        return lancer_ici()
+
     verifier_tkinter()
 
     if "--reinstaller" in sys.argv:
         shutil.rmtree(DOSSIER_VENV, ignore_errors=True)
 
-    if not deja_installe():
-        # Un environnement casse (son Python a ete mis a jour ou desinstalle)
-        # est refait entierement : y reinstaller les bibliotheques echouerait.
-        if not os.path.isfile(python_du_venv()) or not python_du_venv_demarre():
-            fabriquer_l_environnement()
-        installer_les_bibliotheques()
-        print("Installation terminee.\n")
+    if not temoin_a_jour():
+        installer()
 
     if "--verifier" in sys.argv:
         return lancer("verifier_installation.py")
 
-    code = lancer("main.py")
+    # Le logiciel est ouvert par ce meme fichier, execute cette fois par le
+    # Python de l'environnement isole (voir lancer_ici).
+    code = lancer("demarrer.py")
+    if code != 0 and not environnement_fonctionne():
+        # L'environnement ne fonctionne plus (Python mis a jour, bibliotheque
+        # effacee) : il est repare, puis le logiciel est relance.
+        installer()
+        code = lancer("demarrer.py")
     if code != 0:
         # Le logiciel s'est arrete sur une erreur : son message est au-dessus,
         # il faut laisser le temps de le lire.

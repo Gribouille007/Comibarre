@@ -30,13 +30,12 @@ def preparer_revue(suivi, nom_dossier):
         revue["dossier"] = nom_dossier
         revue["photos"] = photos
         revue["position"] = 0
-        revue["historique"] = []
         revue["terminee"] = False
     else:
         # Des photos ont pu etre rangees dans ce dossier depuis la derniere
         # fois, a l'etape de tri : on les ajoute a la fin de la liste. Les
-        # photos deja listees gardent leur place, pour que la position et
-        # l'historique d'annulation restent justes.
+        # photos deja listees gardent leur place, pour que la position reste
+        # juste.
         deja_listees = set(revue["photos"])
         revue["photos"].extend(nom for nom in photos if nom not in deja_listees)
 

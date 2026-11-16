@@ -120,6 +120,16 @@ def appliquer(racine):
 
     style.configure("TSeparator", background=SEPARATEUR)
 
+    # Boutons a choix unique (format des noms des photos) : le rond prend
+    # l'accent quand il est coche.
+    style.configure("TRadiobutton", background=FOND, foreground=TEXTE,
+                    indicatorcolor=SURFACE_HAUTE, indicatorbackground=SURFACE_HAUTE,
+                    padding=(2, 3))
+    style.map("TRadiobutton",
+              background=[("active", FOND)],
+              indicatorcolor=[("selected", ACCENT), ("pressed", SURVOL)],
+              foreground=[("disabled", TEXTE_FAIBLE)])
+
 
 def en_rvb(couleur):
     """« #5a9ef8 » -> (90, 158, 248), pour les dessins faits avec Pillow."""

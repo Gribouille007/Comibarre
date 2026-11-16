@@ -26,6 +26,17 @@ Les fleches gauche et droite font circuler d'une photo a l'autre sans rien
 deplacer. On peut ainsi revenir sur une photo deja rangee : elle est montree
 depuis le dossier ou elle se trouve maintenant, et une touche de tri la deplace
 de ce dossier vers le nouveau.
+
+Annulation (decision de l'utilisateur, 16 novembre 2026). Retour arriere annule
+la derniere action ; mais si l'on est revenu sur une photo avec les fleches,
+il annule ce qui a ete fait a CETTE photo, meme si ce n'est pas la derniere
+modifiee (voir _action_a_annuler). Le rappel des touches dit toujours ce que
+Retour arriere annulera. Tout reste annulable d'une session a l'autre, tant
+que la session n'a pas ete declaree terminee depuis le menu.
+
+Statistiques. Le bas de la fenetre dit en permanence combien de photos restent
+a trier, combien sont rangees dans chaque dossier, et a quel rythme on avance
+(statistiques.py).
 """
 
 import filecmp
@@ -50,6 +61,7 @@ from remise_en_place import proposer_de_remettre_en_place
 from retouches import (appliquer_retouches, chemin_sans_barre, deplacer_sans_barre,
                        effacer_si_vide, enregistrer_retouches, tourner_sans_barre)
 from rognage import cadre_dans_le_sens_d_origine, rogner_fichier, rogner_image
+from statistiques import Statistiques
 from visages import DetecteurVisages, DetectionAnticipee
 from visionneuse import Visionneuse
 
@@ -74,6 +86,10 @@ DELAI_APRES_REDIMENSIONNEMENT = 250
 # Delai, en millisecondes, avant de regarder de nouveau si une photo (ou ses
 # visages) qui n'etait pas encore prete l'est enfin.
 DELAI_ATTENTE_CHARGEMENT = 15
+
+# Ce que le rappel des touches dit de chaque genre d'action annulable.
+NOMS_DES_ACTIONS = {"deplacement": "le rangement", "retouche": "les retouches",
+                    "rognage": "le rognage"}
 
 
 class FenetreRangement:
@@ -104,6 +120,9 @@ class FenetreRangement:
         self.suivi = suivi
         self.etat = etat
         self.photos = etat["photos"]
+        # Position de chaque photo dans la liste, pour retrouver d'un coup
+        # celle que designe une action de l'historique.
+        self.index_des_photos = {nom: index for index, nom in enumerate(self.photos)}
         self.dossier_origine = dossier_origine
         # Les touches de tri ne servent qu'au dossier source et aux dossiers
         # de tri. Dans une copie, elles creeraient des doublons.
@@ -112,6 +131,17 @@ class FenetreRangement:
         # Passe a True quand, au bout des photos, l'utilisateur demande a
         # repasser celles qui restent dans le dossier source (voir tri.lancer_tri).
         self.recommencer = False
+
+        # Annulation : voir _action_a_annuler. Les actions faites dans cette
+        # fenetre sont retenues a part, de la plus ancienne a la plus recente.
+        self.actions_de_la_session = []
+        # Vrai quand l'utilisateur est arrive sur la photo affichee de
+        # lui-meme (ouverture de la fenetre, fleches), et non a la suite d'un
+        # rangement ou d'une annulation.
+        self.a_navigue = True
+
+        # Statistiques affichees en bas de la fenetre (voir statistiques.py).
+        self.stats = Statistiques(suivi, avec_rythme=dossier_origine is None)
 
         # Les apercus sont d'abord prepares a la taille de l'ecran, que la
         # fenetre ne peut pas depasser, puis a celle de la zone d'affichage des
@@ -227,6 +257,12 @@ class FenetreRangement:
                                             anchor="w")
         self.etiquette_retouches.pack(side="left")
 
+        # Statistiques en temps reel : ce qui reste, ce qui est range, le rythme.
+        self.etiquette_stats = tk.Label(barre, text="", bg=COULEUR_BARRE,
+                                        fg=COULEUR_TEXTE, font=police(10),
+                                        anchor="w", justify="left")
+        self.etiquette_stats.pack(side="top", fill="x", padx=14, pady=(6, 0))
+
         self.etiquette_rappel = tk.Label(barre, text="", bg=COULEUR_BARRE,
                                          fg=COULEUR_RAPPEL, font=police(9),
                                          anchor="w", justify="left")
@@ -234,8 +270,12 @@ class FenetreRangement:
         # Avec beaucoup de dossiers, la ligne des touches de tri peut depasser
         # la largeur de la fenetre : elle passe alors a la ligne au lieu d'etre
         # coupee.
-        barre.bind("<Configure>", lambda evenement: self.etiquette_rappel.config(
-            wraplength=max(evenement.width - 28, 100)))
+        barre.bind("<Configure>", self._largeur_de_la_barre_changee)
+
+    def _largeur_de_la_barre_changee(self, evenement):
+        largeur = max(evenement.width - 28, 100)
+        self.etiquette_rappel.config(wraplength=largeur)
+        self.etiquette_stats.config(wraplength=largeur)
 
     def _texte_des_touches(self):
         """Rappel des touches, refait a chaque fois : la touche N ajoute des dossiers."""
@@ -244,15 +284,30 @@ class FenetreRangement:
             # Les touches de rangement sont mises sur leur propre ligne : ce
             # sont celles que l'on cherche des yeux a chaque photo, et elles se
             # perdaient au milieu d'une seule longue ligne de rappels.
-            touches_de_tri = "   ".join("[%s] %s" % (dossier["touche"], dossier["nom"])
-                                        for dossier in self.suivi.dossiers_tri)
+            # Chaque dossier est suivi du nombre de photos qu'il contient.
+            touches_de_tri = "   ".join(
+                "[%s] %s (%d)" % (dossier["touche"], dossier["nom"],
+                                  self.stats.nombre(dossier["nom"]))
+                for dossier in self.suivi.dossiers_tri)
             if not self.suivi.dossier_tri_pour_touche("n"):
                 touches_de_tri += "      [N] nouveau dossier"
             touches_de_tri += "\n"
         return (touches_de_tri
                 + "[Entree] enregistrer et suivante   [Espace] [→] suivante   "
-                  "[←] precedente   [Retour arriere] annuler   [R] pivoter   "
-                  "[C] rogner   [Tab] mode barrer   [Echap] quitter")
+                  "[←] precedente   [Retour arriere] %s   [R] pivoter   "
+                  "[C] rogner   [Tab] mode barrer   [Echap] quitter"
+                % self._texte_de_l_annulation())
+
+    def _texte_de_l_annulation(self):
+        """Dit ce que Retour arriere annulera : « annuler le rognage de 12.jpg »."""
+        action = self._action_a_annuler()
+        if action is None:
+            return "rien a annuler"
+        texte = "annuler %s de %s" % (NOMS_DES_ACTIONS.get(action.get("action"), "l'action"),
+                                      action["fichier"])
+        if action.get("action") == "deplacement":
+            texte += " dans « %s »" % action["dossier"]
+        return texte
 
     def _zone_d_affichage_changee(self, evenement):
         """La zone d'affichage a change de taille : les apercus seront refaits.
@@ -309,6 +364,7 @@ class FenetreRangement:
         else:
             texte = self._texte_des_touches()
         self.etiquette_rappel.config(text=texte)
+        self.etiquette_stats.config(text=self.stats.texte())
 
     def _mettre_a_jour_barre(self):
         """Pastille du mode barrer, et retouches en attente d'enregistrement."""
@@ -507,6 +563,9 @@ class FenetreRangement:
         photos attendaient encore.
         """
         self.etiquette_avancement.config(text="Toutes les photos ont ete parcourues")
+        # Les compteurs sont relus sur le disque : c'est le moment du bilan.
+        self.stats.compter()
+        self._mettre_a_jour_rappel()
         restantes = self._photos_restantes()
         if restantes:
             texte = ("Toutes les photos ont ete parcourues.\n"
@@ -516,7 +575,9 @@ class FenetreRangement:
                      % restantes)
         elif self.dossier_origine is None:
             texte = ("Toutes les photos sont rangees : le dossier source est vide.\n\n"
-                     "Fleche gauche : revenir en arriere      Echap : revenir au menu")
+                     "Fleche gauche : revenir en arriere      Echap : revenir au menu\n\n"
+                     "Tout reste annulable. Quand vous aurez fini, « Terminer la session » "
+                     "dans le menu\nrend le tri definitif et supprime les dossiers vides.")
         else:
             texte = ("Toutes les photos du dossier ont ete revues.\n\n"
                      "Fleche gauche : revenir en arriere      Echap : revenir au menu")
@@ -641,8 +702,10 @@ class FenetreRangement:
         # Les touches du pave numerique portent un autre nom quand le verrouillage
         # numerique est desactive : « KP_Right » au lieu de « Right ».
         elif touche in ("space", "Right", "KP_Right"):
+            self.a_navigue = True
             self.suivante()
         elif touche in ("Left", "KP_Left"):
+            self.a_navigue = True
             self.precedente()
         elif touche == "BackSpace":
             self.annuler()
@@ -696,6 +759,7 @@ class FenetreRangement:
             return
         self.suivi.ajouter_dossier_tri(nouveau["nom"], nouveau["touche"])
         preferences.retenir_dossiers_de_tri(self.suivi.dossiers_tri)
+        self.stats.compter()
         self._mettre_a_jour_rappel()
         self._noter_avancement()
 
@@ -765,6 +829,8 @@ class FenetreRangement:
         """
         if self.position >= len(self.photos):
             return
+        # Sans retouche, Entree ne fait que passer a la suivante, comme Espace.
+        self.a_navigue = True
         nom_fichier = self.photos[self.position]
         dossier_actuel, chemin = self._localiser(nom_fichier)
         if chemin is not None and self._retouches_en_attente():
@@ -783,15 +849,21 @@ class FenetreRangement:
                 return      # on reste sur la photo, retouches toujours a l'ecran
             sauvegarde, bandeaux, rotation = preparees
             self.ecritures.ajouter(chemin, enregistrer_retouches, chemin, bandeaux, rotation)
-            self.etat["historique"].append({
+            self._inscrire({
                 "action": "retouche",
                 "fichier": nom_fichier,
                 "emplacement": dossier_actuel,
-                "sauvegarde": sauvegarde,
+                "sauvegarde": os.path.basename(sauvegarde),
                 "sans_barre": self._garder_sans_barre(sauvegarde, chemin, bandeaux, rotation),
-                "index": self.position,
             })
         self.suivante()
+
+    def _inscrire(self, action):
+        """Ajoute une action a l'historique : elle pourra etre annulee par Retour arriere."""
+        self.suivi.historique.append(action)
+        self.actions_de_la_session.append(action)
+        # Retour arriere annulera d'abord cette action (voir _action_a_annuler).
+        self.a_navigue = False
 
     def _garder_sans_barre(self, sauvegarde, chemin, bandeaux, rotation):
         """Range une copie de la photo sans ses bandeaux dans « Sans-barre ».
@@ -801,13 +873,13 @@ class FenetreRangement:
         barree. Si une version sans barre existe deja (photo barree une seconde
         fois), elle est gardee : c'est elle qui n'a aucun bandeau.
 
-        Renvoie le chemin de la copie creee, ou None si rien n'a ete cree. Un
-        echec ne doit pas interrompre la validation, deja en cours
+        Renvoie True si la copie a ete creee : l'annulation devra l'effacer.
+        Un echec ne doit pas interrompre la validation, deja en cours
         d'enregistrement : on previent, et la photo barree est gardee seule.
         """
         copie = chemin_sans_barre(chemin)
         if not bandeaux or os.path.exists(copie):
-            return None
+            return False
         try:
             os.makedirs(os.path.dirname(copie), exist_ok=True)
             shutil.copy2(sauvegarde, copie)
@@ -818,10 +890,10 @@ class FenetreRangement:
                 "La photo barree est bien enregistree ; Retour arriere la rend "
                 "intacte." % (os.path.basename(chemin), erreur), parent=self.fenetre)
             self.fenetre.focus_force()
-            return None
+            return False
         if rotation:
             self.ecritures.ajouter(copie, tourner_sans_barre, copie, rotation)
-        return copie
+        return True
 
     def _deplacer_sans_barre(self, ancien_chemin, nouveau_chemin):
         """Deplace la version sans bandeaux d'une photo, si elle en a une, avec elle.
@@ -842,10 +914,16 @@ class FenetreRangement:
                 parent=self.fenetre)
             self.fenetre.focus_force()
 
-    def _retirer_sans_barre(self, action):
-        """Efface la version sans bandeaux creee par une action que l'on annule."""
-        copie = action.get("sans_barre")
-        if copie and os.path.isfile(copie):
+    def _retirer_sans_barre(self, action, chemin_photo):
+        """Efface la version sans bandeaux creee par une action que l'on annule.
+
+        Elle se trouve a cote de la photo, la ou celle-ci est maintenant
+        (`chemin_photo`) : elle l'a suivie a chaque deplacement.
+        """
+        if not action.get("sans_barre"):
+            return
+        copie = chemin_sans_barre(chemin_photo)
+        if os.path.isfile(copie):
             self.ecritures.attendre(copie)
             supprimer_fichier(copie)
             effacer_si_vide(os.path.dirname(copie))
@@ -918,10 +996,11 @@ class FenetreRangement:
             "depuis": dossier_actuel,
             "dossier": nom_dossier,
             "sauvegarde": None,
-            "sans_barre": None,
-            "index": self.position,
+            "sans_barre": False,
         }
-        self.etat["historique"].append(action)
+        self._inscrire(action)
+        self.stats.deplacement(dossier_actuel, nom_dossier)
+        self.stats.rangement_fait()
         self.chargeur.changer_chemin(self.position, destination)
         # Le choix est retenu dans le suivi, independamment du disque : c'est
         # ce qui permet de reperer ensuite une photo que la synchronisation
@@ -940,7 +1019,7 @@ class FenetreRangement:
                 sauvegarde, bandeaux, rotation = preparees
                 self.ecritures.ajouter(destination, enregistrer_retouches, destination,
                                        bandeaux, rotation)
-                action["sauvegarde"] = sauvegarde
+                action["sauvegarde"] = os.path.basename(sauvegarde)
                 action["sans_barre"] = self._garder_sans_barre(sauvegarde, destination,
                                                                bandeaux, rotation)
         self.position += 1
@@ -1128,12 +1207,11 @@ class FenetreRangement:
             return      # on reste en rognage : Entree reessaie, Echap abandonne
         self.ecritures.ajouter(chemin, rogner_fichier, chemin, cadre, rotation)
 
-        self.etat["historique"].append({
+        self._inscrire({
             "action": "rognage",
             "fichier": nom_fichier,
             "emplacement": dossier_actuel,
-            "sauvegarde": sauvegarde,
-            "index": self.position,
+            "sauvegarde": os.path.basename(sauvegarde),
         })
 
         # A l'ecran, le meme rognage est applique a la photo deja en memoire,
@@ -1157,10 +1235,65 @@ class FenetreRangement:
     # Annulation
     # ------------------------------------------------------------------
 
-    def annuler(self):
-        """Annule la derniere action (rangement, retouche ou rognage) et reaffiche la photo.
+    def _actions_de_la_photo(self, nom_fichier):
+        """Actions encore annulables de cette photo, la plus recente en dernier.
 
-        L'action ne quitte l'historique qu'une fois annulee. Si un fichier
+        Une copie faite depuis le menu contient les memes noms que les
+        dossiers de tri : ses retouches ne sont pas celles de la photo
+        d'origine. Dans une copie, on ne voit donc que les actions faites
+        dans cette copie ; ailleurs, on ne voit pas celles des copies.
+        """
+        actions = self.suivi.actions_de_la_photo(nom_fichier)
+        if not self.touches_de_tri:
+            return [action for action in actions
+                    if action.get("emplacement") == self.dossier_origine]
+        copies = self.suivi.dossiers_dupliques
+        return [action for action in actions if action.get("emplacement") not in copies]
+
+    def _action_a_annuler(self):
+        """Choisit l'action que Retour arriere annulera, ou None.
+
+        Deux habitudes doivent cohabiter :
+
+        - on vient de ranger une photo par erreur : la suivante est deja a
+          l'ecran, et Retour arriere doit ramener la photo rangee. Plusieurs
+          appuis remontent les actions de la session, de la plus recente a la
+          plus ancienne ;
+        - on revient sur une ancienne photo avec les fleches, pour defaire ce
+          qu'on lui a fait : Retour arriere doit alors annuler la derniere
+          action de CETTE photo, meme si d'autres photos ont ete modifiees
+          depuis, et meme si c'etait lors d'une session precedente.
+
+        C'est la facon d'arriver sur la photo qui les departage (`a_navigue`).
+        Sans cela, apres un rangement fait par erreur, Retour arriere aurait
+        retire les bandeaux poses la veille sur la photo suivante, au lieu de
+        ramener la photo qu'on venait de ranger.
+        """
+        if self.a_navigue and self.position < len(self.photos):
+            actions = self._actions_de_la_photo(self.photos[self.position])
+            if actions:
+                return actions[-1]
+        # Derniere action de la session qui soit encore dans l'historique
+        # (elle a pu en sortir : dossier retire, session terminee).
+        for action in reversed(self.actions_de_la_session):
+            if any(action is autre for autre in self.suivi.historique):
+                return action
+        return None
+
+    def _oublier_l_action(self, action):
+        """Retire de l'historique une action qui vient d'etre annulee."""
+        self.suivi.donnees["historique"] = [autre for autre in self.suivi.historique
+                                            if autre is not action]
+        self.actions_de_la_session = [autre for autre in self.actions_de_la_session
+                                      if autre is not action]
+
+    def annuler(self):
+        """Annule une action (rangement, retouche ou rognage) et reaffiche sa photo.
+
+        L'action est choisie par _action_a_annuler : la derniere de la
+        session, ou la derniere de la photo sur laquelle on est revenu.
+
+        Elle ne quitte l'historique qu'une fois annulee. Si un fichier
         refuse de bouger (photo ouverte dans un autre programme, OneDrive...),
         l'utilisateur est prevenu et l'action reste en place : rappuyer sur
         Retour arriere reprend la ou l'on s'etait arrete. Auparavant, elle
@@ -1168,8 +1301,8 @@ class FenetreRangement:
         second appui annulait l'action d'avant, sur une autre photo ; une
         photo pivotee le restait alors pour de bon.
         """
-        historique = self.etat["historique"]
-        if not historique:
+        action = self._action_a_annuler()
+        if action is None:
             return
 
         # Les enregistrements en cours doivent etre termines avant de deplacer
@@ -1178,13 +1311,13 @@ class FenetreRangement:
             self._attendre_les_enregistrements(self.annuler)
             return
 
-        derniere = historique[-1]
+        index = self.index_des_photos.get(action["fichier"])
         try:
-            if derniere.get("action") in ("rognage", "retouche"):
-                self._remettre_la_sauvegarde(derniere)
-                self._retirer_sans_barre(derniere)
+            if action.get("action") in ("rognage", "retouche"):
+                chemin = self._remettre_la_sauvegarde(action)
+                self._retirer_sans_barre(action, chemin)
             else:
-                self._annuler_deplacement(derniere)
+                self._annuler_deplacement(action)
         except OSError as erreur:
             messagebox.showerror(
                 "Annulation impossible",
@@ -1192,18 +1325,19 @@ class FenetreRangement:
                 "jusqu'au bout :\n%s\n\n"
                 "Rien n'est perdu. Un autre programme utilise peut-etre le fichier ; "
                 "rappuyez sur Retour arriere pour reessayer."
-                % (derniere["fichier"], erreur), parent=self.fenetre)
+                % (action["fichier"], erreur), parent=self.fenetre)
             self.fenetre.focus_force()
             # Une partie de l'annulation a pu avoir lieu : l'ecran et le suivi
             # doivent dire ce qui est reellement sur le disque. Sinon, l'ecran
             # pouvait montrer un bandeau qui n'etait plus dans le fichier.
-            if derniere["index"] == self.position:
+            if index == self.position:
                 self.afficher_photo_courante()
             self._noter_avancement()
             return
 
-        historique.pop()
-        self.position = derniere["index"]
+        self._oublier_l_action(action)
+        if index is not None:
+            self.position = index
         self.etat["terminee"] = False
         self.afficher_photo_courante()
         self._noter_avancement()
@@ -1216,6 +1350,7 @@ class FenetreRangement:
         `ramenee` note que la photo elle-meme est deja revenue.
         """
         nom_fichier = deplacement["fichier"]
+        index = self.index_des_photos.get(nom_fichier)
         # Les historiques ecrits par une version precedente ne notaient pas le
         # dossier de depart : c'etait alors toujours le dossier source (None).
         depuis = deplacement.get("depuis")
@@ -1239,21 +1374,25 @@ class FenetreRangement:
                 return
             deplacer_fichier(chemin_actuel, chemin_retour)
             deplacement["ramenee"] = True
-            self.chargeur.changer_chemin(deplacement["index"], chemin_retour)
+            self.stats.deplacement(deplacement["dossier"], depuis)
+            self.stats.rangement_annule()
+            if index is not None:
+                self.chargeur.changer_chemin(index, chemin_retour)
             self.suivi.noter_rangement(
                 nom_fichier, depuis if depuis in self.suivi.noms_dossiers_tri else None)
 
         # La copie intacte est remise avant tout le reste : c'est elle qui
         # compte. La version sans barre n'en est qu'une copie, qui n'est
         # effacee qu'une fois l'originale revenue.
-        sauvegarde = deplacement.get("sauvegarde")
+        sauvegarde = self.suivi.chemin_sauvegarde(deplacement)
         if sauvegarde and os.path.isfile(sauvegarde):
             remplacer_fichier(sauvegarde, chemin_retour)
-            self.chargeur.oublier(deplacement["index"])
-            self._oublier_les_visages(deplacement["index"])
+            if index is not None:
+                self.chargeur.oublier(index)
+                self._oublier_les_visages(index)
         # La version sans bandeaux creee par ce rangement disparait avec ses
         # bandeaux ; une version plus ancienne revient avec la photo.
-        self._retirer_sans_barre(deplacement)
+        self._retirer_sans_barre(deplacement, chemin_actuel)
         self._deplacer_sans_barre(chemin_actuel, chemin_retour)
 
     def _remettre_la_sauvegarde(self, action):
@@ -1263,17 +1402,22 @@ class FenetreRangement:
         synchronisation a pu la deplacer depuis (la ramener dans le dossier
         source) : remise a son ancien emplacement, la copie aurait fait un
         doublon, et la photo serait restee modifiee.
+
+        Renvoie le chemin de la photo.
         """
-        sauvegarde = action.get("sauvegarde")
-        chemin = os.path.join(self._chemin_du_dossier(action["emplacement"]),
+        sauvegarde = self.suivi.chemin_sauvegarde(action)
+        chemin = os.path.join(self._chemin_du_dossier(action.get("emplacement")),
                               action["fichier"])
         if not os.path.isfile(chemin):
             chemin = self._localiser(action["fichier"])[1] or chemin
         if sauvegarde and os.path.isfile(sauvegarde):
             remplacer_fichier(sauvegarde, chemin)
         # L'image en memoire est la version modifiee : il faut relire l'originale.
-        self.chargeur.oublier(action["index"])
-        self._oublier_les_visages(action["index"])
+        index = self.index_des_photos.get(action["fichier"])
+        if index is not None:
+            self.chargeur.oublier(index)
+            self._oublier_les_visages(index)
+        return chemin
 
     # ------------------------------------------------------------------
     # Enregistrements en arriere-plan
@@ -1362,32 +1506,23 @@ class FenetreRangement:
         self.chargeur.arreter()
 
         # Une annulation restee a mi-chemin est terminee tant que la copie
-        # intacte existe encore. Seule la derniere action est concernee : une
-        # plus ancienne designerait un emplacement que la photo a pu quitter.
-        historique = self.etat["historique"]
-        if historique and historique[-1].get("ramenee"):
+        # intacte existe encore. Seule la derniere action d'une photo est
+        # concernee : une plus ancienne designerait un emplacement que la
+        # photo a pu quitter.
+        for action in [action for action in self.suivi.historique if action.get("ramenee")]:
+            if self._actions_de_la_photo(action["fichier"])[-1:] != [action]:
+                continue
             try:
-                self._annuler_deplacement(historique[-1])
-                historique.pop()
+                self._annuler_deplacement(action)
+                self._oublier_l_action(action)
             except OSError:
                 pass
 
-        # Les copies de sauvegarde ne servent qu'a l'annulation en cours de
-        # session (section 9.6) : elles sont effacees a la fermeture, et les
-        # rognages et retouches quittent donc l'historique. Les deplacements,
-        # eux, restent annulables a la session suivante, sans leurs retouches.
-        self._effacer_les_sauvegardes()
-        historique = []
-        for action in self.etat["historique"]:
-            if action.get("action") in ("rognage", "retouche"):
-                continue
-            # Sans sa sauvegarde, la photo garde ses bandeaux meme annulee :
-            # sa version sans barre ne doit donc plus etre effacee, seulement
-            # suivre la photo.
-            action["sauvegarde"] = None
-            action["sans_barre"] = None
-            historique.append(action)
-        self.etat["historique"] = historique
+        # Les copies de sauvegarde et l'historique sont gardes : tout reste
+        # annulable a la prochaine session, jusqu'a ce que l'utilisateur
+        # declare la session terminee (fin_de_session.py). Seul un dossier de
+        # sauvegardes reste vide est retire.
+        effacer_si_vide(self.suivi.chemin_dossier_temporaire())
         # La fenetre se ferme meme si le suivi ne peut pas etre enregistre
         # (tenu ouvert par un autre programme) : elle restait sinon a l'ecran,
         # ses fils deja arretes, photos bloquees sur « Chargement... ».
@@ -1401,18 +1536,3 @@ class FenetreRangement:
                 "liste pourrait etre perdue." % erreur, parent=self.fenetre)
         self.fenetre.destroy()
 
-    def _effacer_les_sauvegardes(self):
-        """Vide le dossier des copies de sauvegarde, s'il n'est que cela.
-
-        Un evenement cree par une version precedente a pu donner ce nom a l'un
-        de ses dossiers de tri, ou a une copie : le vider aurait efface des
-        photos de l'utilisateur. Le nom est desormais refuse partout ; par
-        prudence, un tel dossier n'est de toute facon jamais vide ici.
-        """
-        dossier = self.suivi.chemin_dossier_temporaire()
-        nom = os.path.basename(dossier).lower()
-        noms_de_l_utilisateur = {autre.lower() for autre in
-                                 self.suivi.noms_dossiers_tri + self.suivi.dossiers_dupliques}
-        if nom in noms_de_l_utilisateur:
-            return
-        shutil.rmtree(dossier, ignore_errors=True)

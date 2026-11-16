@@ -14,6 +14,22 @@ cd "$(dirname "$0")" || exit 1
 VERSION_MINIMALE="3.11"
 
 # --------------------------------------------------------------------------
+# Lancement rapide
+# --------------------------------------------------------------------------
+# Une fois l'installation faite, le Python de l'environnement isole ouvre
+# directement le logiciel : inutile de chercher un Python a chaque lancement.
+# demarrer.py repond 3 quand il y a quelque chose a installer ou a reparer ;
+# 126 et 127 signalent un Python qui ne demarre plus. Dans ces cas seulement,
+# on continue par le chemin complet, ci-dessous.
+if [ "$#" -eq 0 ] && [ -x "venv/bin/python" ]; then
+    venv/bin/python demarrer.py
+    code=$?
+    if [ "$code" -ne 3 ] && [ "$code" -ne 126 ] && [ "$code" -ne 127 ]; then
+        exit "$code"
+    fi
+fi
+
+# --------------------------------------------------------------------------
 # Trouver un Python utilisable
 # --------------------------------------------------------------------------
 # Plusieurs Python coexistent souvent sur une meme machine. On essaie les noms
